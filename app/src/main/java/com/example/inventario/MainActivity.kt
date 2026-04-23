@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,7 +74,7 @@ class MainActivity : ComponentActivity() {
             InventarioTheme {
                 val viewModel: InventarioViewModel = viewModel()
                 val context = LocalContext.current
-                var showForm by remember { mutableStateOf(false) }
+                var showForm by rememberSaveable { mutableStateOf(false) }
                 
                 LaunchedEffect(Unit) {
                     viewModel.fetchEquipos()
@@ -170,20 +171,21 @@ fun FormularioEquipo(viewModel: InventarioViewModel, onDismiss: () -> Unit) {
         permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    var nombre by remember { mutableStateOf("") }
-    var descripcion by remember { mutableStateOf("") }
-    var categoria by remember { mutableStateOf("") }
-    var marca by remember { mutableStateOf("") }
-    var modelo by remember { mutableStateOf("") }
-    var estado by remember { mutableStateOf("FUNCIONAL") }
-    var numeroSerie by remember { mutableStateOf("") }
-    var noInventario by remember { mutableStateOf("") }
-    var numerotag by remember { mutableStateOf("") }
-    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var nombre by rememberSaveable { mutableStateOf("") }
+    var descripcion by rememberSaveable { mutableStateOf("") }
+    var categoria by rememberSaveable { mutableStateOf("") }
+    var marca by rememberSaveable { mutableStateOf("") }
+    var modelo by rememberSaveable { mutableStateOf("") }
+    var estado by rememberSaveable { mutableStateOf("FUNCIONAL") }
+    var numeroSerie by rememberSaveable { mutableStateOf("") }
+    var noInventario by rememberSaveable { mutableStateOf("") }
+    var numerotag by rememberSaveable { mutableStateOf("") }
+    var imageUriString by rememberSaveable { mutableStateOf<String?>(null) }
+    val imageUri = imageUriString?.let { Uri.parse(it) }
     
-    var showCameraOCR by remember { mutableStateOf(false) }
-    var ocrTargetField by remember { mutableStateOf("") } // "serie" o "tag"
-    var showCameraPhoto by remember { mutableStateOf(false) }
+    var showCameraOCR by rememberSaveable { mutableStateOf(false) }
+    var ocrTargetField by rememberSaveable { mutableStateOf("") } // "serie" o "tag"
+    var showCameraPhoto by rememberSaveable { mutableStateOf(false) }
 
     // Estados para los menús desplegables
     var expandedEstado by remember { mutableStateOf(false) }
@@ -373,7 +375,7 @@ fun FormularioEquipo(viewModel: InventarioViewModel, onDismiss: () -> Unit) {
     if (showCameraPhoto) {
         CameraPhotoDialog(
             onCaptured = { uri ->
-                imageUri = uri
+                imageUriString = uri.toString()
                 showCameraPhoto = false
             },
             onDismiss = { showCameraPhoto = false }
