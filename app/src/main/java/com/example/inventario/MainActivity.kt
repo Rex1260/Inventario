@@ -19,6 +19,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -448,6 +449,7 @@ fun CameraOCRDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val recognizer = remember { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+    var currentText by remember { mutableStateOf("") }
     
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -472,9 +474,8 @@ fun CameraOCRDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
                                         recognizer.process(image)
                                             .addOnSuccessListener { visionText ->
                                                 val detectedText = visionText.textBlocks.firstOrNull()?.text
-                                                if (!detectedText.isNullOrBlank() && detectedText.length > 3) {
-                                                    // Detectamos algo que parezca un código
-                                                    onResult(detectedText)
+                                                if (!detectedText.isNullOrBlank()) {
+                                                    currentText = detectedText
                                                 }
                                             }
                                             .addOnCompleteListener { imageProxy.close() }
@@ -498,16 +499,43 @@ fun CameraOCRDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
             // Guía visual
             Box(
                 modifier = Modifier
-                    .size(width = 300.dp, height = 100.dp)
+                    .size(width = 300.dp, height = 120.dp)
                     .align(Alignment.Center)
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color.White.copy(alpha = 0.2f))
+                    .border(2.dp, if (currentText.isNotEmpty()) Color.Green else Color.White, RoundedCornerShape(8.dp))
             )
-            Text(
-                "Apunta al código",
-                color = Color.White,
-                modifier = Modifier.align(Alignment.Center).padding(top = 120.dp)
-            )
+
+            Column(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (currentText.isNotEmpty()) {
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.7f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    ) {
+                        Text(
+                            text = currentText,
+                            color = Color.White,
+                            modifier = Modifier.padding(8.dp),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = { if (currentText.isNotEmpty()) onResult(currentText) },
+                    enabled = currentText.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth(0.7f).height(56.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("CAPTURAR TEXTO", fontWeight = FontWeight.Bold)
+                }
+            }
             
             IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
                 Icon(Icons.Default.Close, null, tint = Color.White)
