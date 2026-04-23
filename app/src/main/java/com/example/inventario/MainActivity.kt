@@ -601,7 +601,22 @@ fun CameraOCRDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
                                         val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
                                         recognizer.process(image)
                                             .addOnSuccessListener { visionText ->
-                                                val detectedText = visionText.textBlocks.firstOrNull()?.text
+                                                // Delimitamos el OCR: Buscamos el bloque de texto más central
+                                                val imageWidth = image.width
+                                                val imageHeight = image.height
+                                                
+                                                val centerBlock = visionText.textBlocks.find { block ->
+                                                    val box = block.boundingBox ?: return@find false
+                                                    val centerX = box.centerX()
+                                                    val centerY = box.centerY()
+                                                    
+                                                    // Solo aceptamos texto que esté en el 60% central horizontal 
+                                                    // y 40% central vertical de la imagen (ROI delimitada)
+                                                    centerX > imageWidth * 0.2 && centerX < imageWidth * 0.8 &&
+                                                    centerY > imageHeight * 0.3 && centerY < imageHeight * 0.7
+                                                }
+
+                                                val detectedText = centerBlock?.text ?: ""
                                                 if (!detectedText.isNullOrBlank()) {
                                                     currentText = detectedText
                                                 }
