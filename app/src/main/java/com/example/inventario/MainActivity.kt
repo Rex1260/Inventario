@@ -84,6 +84,7 @@ class MainActivity : ComponentActivity() {
                 val viewModel: InventarioViewModel = viewModel()
                 val context = LocalContext.current
                 var showForm by rememberSaveable { mutableStateOf(false) }
+                var equipoAEditar by remember { mutableStateOf<Equipo?>(null) }
                 
                 LaunchedEffect(Unit) {
                     viewModel.fetchEquipos()
@@ -123,7 +124,10 @@ class MainActivity : ComponentActivity() {
                     },
                     floatingActionButton = {
                         if (!viewModel.isTrashMode) {
-                            FloatingActionButton(onClick = { showForm = true }) {
+                            FloatingActionButton(onClick = { 
+                                equipoAEditar = null
+                                showForm = true 
+                            }) {
                                 Icon(Icons.Default.Add, contentDescription = "Agregar Equipo")
                             }
                         }
@@ -170,7 +174,13 @@ class MainActivity : ComponentActivity() {
                                         verticalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
                                         items(viewModel.filteredEquipos) { equipo ->
-                                            EquipoCard(equipo)
+                                            EquipoCard(
+                                                equipo = equipo,
+                                                onEdit = {
+                                                    equipoAEditar = equipo
+                                                    showForm = true
+                                                }
+                                            )
                                         }
                                     }
                                 }
@@ -181,7 +191,11 @@ class MainActivity : ComponentActivity() {
                     if (showForm) {
                         FormularioEquipo(
                             viewModel = viewModel,
-                            onDismiss = { showForm = false }
+                            equipoExistente = equipoAEditar,
+                            onDismiss = { 
+                                showForm = false
+                                equipoAEditar = null
+                            }
                         )
                     }
                 }
@@ -191,10 +205,16 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun FormularioEquipo(viewModel: InventarioViewModel, onDismiss: () -> Unit) {
+fun FormularioEquipo(
+    viewModel: InventarioViewModel, 
+    equipoExistente: Equipo? = null,
+    onDismiss: () -> Unit
+) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     
+    val isEditMode = equipoExistente != null
+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -207,28 +227,44 @@ fun FormularioEquipo(viewModel: InventarioViewModel, onDismiss: () -> Unit) {
         permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    var nombre by rememberSaveable { mutableStateOf("") }
-    var descripcion by rememberSaveable { mutableStateOf("") }
-    var categoria by rememberSaveable { mutableStateOf("") }
-    var marca by rememberSaveable { mutableStateOf("") }
-    var modelo by rememberSaveable { mutableStateOf("") }
-    var estado by rememberSaveable { mutableStateOf("FUNCIONAL") }
-    var numeroSerie by rememberSaveable { mutableStateOf("") }
-    var noInventario by rememberSaveable { mutableStateOf("") }
-    var numerotag by rememberSaveable { mutableStateOf("") }
-    var imageUriString by rememberSaveable { mutableStateOf<String?>(null) }
-    val imageUri = imageUriString?.let { Uri.parse(it) }
+    var nombre by rememberSaveable { mutableStateOf(equipoExistente?.nombre ?: "") }
+    var descripcion by rememberSaveable { mutableStateOf(equipoExistente?.descripcion ?: "") }
+    var categoria by rememberSaveable { mutableStateOf(equipoExistente?.categoria ?: "") }
+    var marca by rememberSaveable { mutableStateOf(equipoExistente?.marca ?: "") }
+    var modelo by rememberSaveable { mutableStateOf(equipoExistente?.modelo ?: "") }
+    var estado by rememberSaveable { mutableStateOf(equipoExistente?.estado ?: "FUNCIONAL") }
+    var numeroSerie by rememberSaveable { mutableStateOf(equipoExistente?.numeroSerie ?: "") }
+    var noInventario by rememberSaveable { mutableStateOf(equipoExistente?.noInventario ?: "") }
+    var numerotag by rememberSaveable { mutableStateOf(equipoExistente?.numerotag ?: "") }
+    var imageUriString by rememberSaveable { mutableStateOf<String?>(equipoExistente?.imagenUrl) }
+    val imageUri = if (imageUriString?.startsWith("http") == true) null else imageUriString?.let { Uri.parse(it) }
     
     var showCameraOCR by rememberSaveable { mutableStateOf(false) }
     var ocrTargetField by rememberSaveable { mutableStateOf("") } // "serie" o "tag"
     var showCameraPhoto by rememberSaveable { mutableStateOf(false) }
+    var showDiscardDialog by remember { mutableStateOf(false) }
 
     // Estados para los menús desplegables
     var expandedEstado by remember { mutableStateOf(false) }
     val estados = listOf("FUNCIONAL", "OBSOLETO", "DESCOMPUESTO")
 
+    val hasChanges = remember(
+        nombre, descripcion, categoria, marca, modelo, estado, numeroSerie, noInventario, numerotag, imageUriString
+    ) {
+        nombre != (equipoExistente?.nombre ?: "") ||
+        descripcion != (equipoExistente?.descripcion ?: "") ||
+        categoria != (equipoExistente?.categoria ?: "") ||
+        marca != (equipoExistente?.marca ?: "") ||
+        modelo != (equipoExistente?.modelo ?: "") ||
+        estado != (equipoExistente?.estado ?: "FUNCIONAL") ||
+        numeroSerie != (equipoExistente?.numeroSerie ?: "") ||
+        noInventario != (equipoExistente?.noInventario ?: "") ||
+        numerotag != (equipoExistente?.numerotag ?: "") ||
+        imageUriString != (equipoExistente?.imagenUrl)
+    }
+
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (hasChanges) showDiscardDialog = true else onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
@@ -242,8 +278,14 @@ fun FormularioEquipo(viewModel: InventarioViewModel, onDismiss: () -> Unit) {
                     .verticalScroll(rememberScrollState())
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onDismiss) { Icon(Icons.Default.ArrowBack, null) }
-                    Text("Nuevo Equipo", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = { if (hasChanges) showDiscardDialog = true else onDismiss() }) { 
+                        Icon(Icons.Default.ArrowBack, null) 
+                    }
+                    Text(
+                        if (isEditMode) "Editar Equipo" else "Nuevo Equipo", 
+                        style = MaterialTheme.typography.titleLarge, 
+                        fontWeight = FontWeight.Bold
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -258,9 +300,9 @@ fun FormularioEquipo(viewModel: InventarioViewModel, onDismiss: () -> Unit) {
                         .clickable { showCameraPhoto = true },
                     contentAlignment = Alignment.Center
                 ) {
-                    if (imageUri != null) {
+                    if (!imageUriString.isNullOrEmpty()) {
                         AsyncImage(
-                            model = imageUri,
+                            model = imageUriString,
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
@@ -276,18 +318,23 @@ fun FormularioEquipo(viewModel: InventarioViewModel, onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // No. Inventario (Validación 8 caracteres: 3 letras + 5 números)
+                val isDuplicated = viewModel.isNoInventarioDuplicado(noInventario, equipoExistente?.id)
                 OutlinedTextField(
                     value = noInventario,
                     onValueChange = { 
                         val input = it.uppercase().take(8)
                         noInventario = input
-                        if (input.length == 3) {
+                        if (input.length == 3 && !isEditMode) {
                             noInventario = viewModel.sugerirSiguienteNumero(input)
                         }
                     },
                     label = { Text("No. Inventario (Ej: ABC00001)") },
                     modifier = Modifier.fillMaxWidth(),
-                    isError = noInventario.length != 8 && noInventario.isNotEmpty()
+                    isError = (noInventario.length != 8 && noInventario.isNotEmpty()) || isDuplicated,
+                    supportingText = {
+                        if (isDuplicated) Text("¡Este número de inventario ya existe!", color = Color.Red)
+                        else if (noInventario.length > 0 && noInventario.length != 8) Text("Debe tener 8 caracteres")
+                    }
                 )
 
                 CampoTextoMayusculas(nombre, "Nombre del Equipo") { nombre = it }
@@ -359,10 +406,17 @@ fun FormularioEquipo(viewModel: InventarioViewModel, onDismiss: () -> Unit) {
 
                 Button(
                     onClick = {
-                        if (noInventario.length == 8) {
+                        if (noInventario.length == 8 && !isDuplicated) {
                             coroutineScope.launch {
-                                val url = if (imageUri != null) subirImagen(context, imageUri!!) else null
-                                val nuevoEquipo = Equipo(
+                                // Si hay una nueva imagen (uri local), la subimos
+                                val finalUrl = if (imageUri != null) {
+                                    subirImagen(context, imageUri)
+                                } else {
+                                    imageUriString // Mantenemos la URL actual si es de internet
+                                }
+
+                                val equipoData = Equipo(
+                                    id = equipoExistente?.id,
                                     nombre = nombre,
                                     descripcion = descripcion,
                                     categoria = categoria,
@@ -372,29 +426,55 @@ fun FormularioEquipo(viewModel: InventarioViewModel, onDismiss: () -> Unit) {
                                     numeroSerie = numeroSerie,
                                     numerotag = numerotag,
                                     noInventario = noInventario,
-                                    imagenUrl = url,
-                                    creadoPorModelo = android.os.Build.MODEL,
-                                    creadoPorNombre = android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido",
+                                    imagenUrl = finalUrl,
+                                    creadoPorModelo = equipoExistente?.creadoPorModelo ?: android.os.Build.MODEL,
+                                    creadoPorNombre = equipoExistente?.creadoPorNombre ?: (android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido"),
                                     modificadoPorModelo = android.os.Build.MODEL,
                                     modificadoPorNombre = android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido"
                                 )
-                                viewModel.guardarEquipo(nuevoEquipo, null) {
-                                    onDismiss()
-                                    Toast.makeText(context, "Guardado exitosamente", Toast.LENGTH_SHORT).show()
+
+                                if (isEditMode) {
+                                    viewModel.actualizarEquipo(equipoData, equipoExistente?.imagenUrl, imageUri) {
+                                        onDismiss()
+                                        Toast.makeText(context, "Actualizado exitosamente", Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    viewModel.guardarEquipo(equipoData, null) {
+                                        onDismiss()
+                                        Toast.makeText(context, "Guardado exitosamente", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         } else {
-                            Toast.makeText(context, "No. Inventario debe tener 8 caracteres", Toast.LENGTH_SHORT).show()
+                            val msg = if (isDuplicated) "Número de inventario ya existe" else "Revisa los campos obligatorios"
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !viewModel.isLoading
                 ) {
                     if (viewModel.isLoading) CircularProgressIndicator(color = Color.White)
-                    else Text("GUARDAR EQUIPO")
+                    else Text(if (isEditMode) "ACTUALIZAR DATOS" else "GUARDAR EQUIPO")
                 }
             }
         }
+    }
+
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text("¿Descartar cambios?") },
+            text = { Text("Tienes cambios sin guardar. ¿Deseas salir de todas formas?") },
+            confirmButton = {
+                TextButton(onClick = { 
+                    showDiscardDialog = false
+                    onDismiss() 
+                }) { Text("SÍ, DESCARTAR", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) { Text("CONTINUAR EDITANDO") }
+            }
+        )
     }
 
     if (showCameraOCR) {
@@ -704,7 +784,7 @@ fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeig
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EquipoCard(equipo: Equipo) {
+fun EquipoCard(equipo: Equipo, onEdit: () -> Unit) {
     val viewModel: InventarioViewModel = viewModel()
     val context = LocalContext.current
     var showZoom by remember { mutableStateOf(false) }
@@ -716,7 +796,7 @@ fun EquipoCard(equipo: Equipo) {
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
-                onClick = { /* Zoom si no está borrado o lo que prefieras */ },
+                onClick = { /* Click normal */ },
                 onLongClick = { 
                     if (viewModel.isTrashMode) {
                         showRestoreDialog = true
@@ -758,12 +838,22 @@ fun EquipoCard(equipo: Equipo) {
                         }
                     }
                 } else {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Mantén presionado para borrar",
-                        tint = Color.Gray.copy(alpha = 0.3f),
-                        modifier = Modifier.size(16.dp)
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onEdit) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Editar",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Mantén presionado para borrar",
+                            tint = Color.Gray.copy(alpha = 0.3f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))

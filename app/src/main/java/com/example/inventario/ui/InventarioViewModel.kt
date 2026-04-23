@@ -84,6 +84,12 @@ class InventarioViewModel : ViewModel() {
         }
     }
 
+    fun isNoInventarioDuplicado(noInventario: String, currentId: String?): Boolean {
+        // Buscamos en la lista local (que ya tiene todos los registros cargados)
+        // si existe otro equipo con ese número que no sea el mismo que estamos editando
+        return _equipos.any { it.noInventario == noInventario && it.id != currentId }
+    }
+
     fun toggleTrashMode() {
         isTrashMode = !isTrashMode
         fetchEquipos()
@@ -162,6 +168,60 @@ class InventarioViewModel : ViewModel() {
                 onSuccess()
             } catch (e: Exception) {
                 errorMessage = "Error al guardar: ${e.message}"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun actualizarEquipo(
+        equipo: Equipo,
+        oldImagenUrl: String?,
+        nuevaImagenUri: Uri?,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                // 1. Si hay una imagen anterior y se subió una nueva, borramos la vieja del Storage
+                if (!oldImagenUrl.isNullOrEmpty() && nuevaImagenUri != null) {
+                    try {
+                        val fileName = oldImagenUrl.substringAfterLast("/")
+                        supabase.storage.from("fotos_equipos").delete(fileName)
+                    } catch (e: Exception) {
+                        // Continuamos aunque falle el borrado de la imagen vieja
+                    }
+                }
+
+                // 2. Actualizar en DB
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault())
+                val now = sdf.format(Date())
+                
+                // Preparamos los datos a actualizar (excluimos campos que no cambian como fecha_registro o id)
+                val updates = mapOf(
+                    "no_inventario" to equipo.noInventario,
+                    "nombre" to equipo.nombre,
+                    "descripcion" to equipo.descripcion,
+                    "categoria" to equipo.categoria,
+                    "marca" to equipo.marca,
+                    "modelo" to equipo.modelo,
+                    "estado" to equipo.estado,
+                    "numero_serie" to equipo.numeroSerie,
+                    "numerotag" to equipo.numerotag,
+                    "imagen_url" to equipo.imagenUrl,
+                    "fecha_modificacion" to now,
+                    "modificado_por_modelo" to equipo.modificadoPorModelo,
+                    "modificado_por_nombre" to equipo.modificadoPorNombre
+                )
+
+                supabase.from("equipos").update(updates) {
+                    filter { eq("id", equipo.id!!) }
+                }
+
+                fetchEquipos()
+                onSuccess()
+            } catch (e: Exception) {
+                errorMessage = "Error al actualizar: ${e.message}"
             } finally {
                 isLoading = false
             }
