@@ -12,6 +12,7 @@ import com.example.inventario.data.supabase
 import com.example.inventario.model.Equipo
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -45,11 +46,11 @@ class InventarioViewModel : ViewModel() {
             isLoading = true
             errorMessage = null
             try {
-                // Filtramos para traer solo los que NO están eliminados
+                // Filtramos para traer solo los que NO están eliminados (deleted_at es NULL)
                 val results = supabase.from("equipos")
                     .select() {
                         filter {
-                            eq("deleted_at", "null")
+                            filter("deleted_at", FilterOperator.IS, null)
                         }
                         order("fecha_registro", Order.DESCENDING)
                     }
