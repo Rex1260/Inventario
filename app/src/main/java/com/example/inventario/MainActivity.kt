@@ -39,6 +39,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -607,22 +613,64 @@ fun CameraPhotoDialog(onCaptured: (Uri) -> Unit, onDismiss: () -> Unit) {
 
 suspend fun subirImagen(context: Context, uri: Uri): String? {
     return withContext(Dispatchers.IO) {
+        val startTime = System.currentTimeMillis()
         try {
-            val bitmap = BitmapFactory.decodeStream(context.contentResolver.openInputStream(uri))
+            // Optimización 1: Obtener dimensiones sin cargar el bitmap completo en memoria
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            context.contentResolver.openInputStream(uri)?.use { 
+                BitmapFactory.decodeStream(it, null, options)
+            }
+            
+            // Optimización 2: Calcular el factor de escala (inSampleSize)
+            // Limitamos la imagen a un máximo de 1200px para balancear calidad y memoria
+            options.inSampleSize = calculateInSampleSize(options, 1200, 1200)
+            options.inJustDecodeBounds = false
+            
+            // Optimización 3: Decodificar el bitmap con el tamaño reducido
+            val bitmap = context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, options)
+            } ?: return@withContext null
+
             val bos = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 50, bos) // Compresión al 50%
+            // Compresión eficiente al 50%
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 50, bos)
             val bytes = bos.toByteArray()
+            
+            // Liberar memoria del bitmap inmediatamente
+            bitmap.recycle()
             
             val fileName = "equipo_${System.currentTimeMillis()}.jpg"
             supabase.storage.from("fotos_equipos").upload(fileName, bytes)
             
+            val duration = System.currentTimeMillis() - startTime
+            Log.d("Performance", "Imagen procesada y subida en ${duration}ms. Tamaño final: ${bytes.size / 1024}KB")
+            
             // Obtener URL pública
             supabase.storage.from("fotos_equipos").publicUrl(fileName)
         } catch (e: Exception) {
-            Log.e("Upload", "Error: ${e.message}")
+            Log.e("Performance", "Error en subirImagen: ${e.message}")
             null
         }
     }
+}
+
+/**
+ * Calcula el factor de escala para reducir el uso de memoria al decodificar Bitmaps.
+ */
+fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
+    val (height: Int, width: Int) = options.outHeight to options.outWidth
+    var inSampleSize = 1
+
+    if (height > reqHeight || width > reqWidth) {
+        val halfHeight: Int = height / 2
+        val halfWidth: Int = width / 2
+        while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
+            inSampleSize *= 2
+        }
+    }
+    return inSampleSize
 }
 
 @Composable
@@ -678,6 +726,13 @@ fun EquipoCard(equipo: Equipo) {
     }
 
     if (showZoom && !equipo.imagenUrl.isNullOrEmpty()) {
+        var scale by remember { mutableStateOf(1f) }
+        var offset by remember { mutableStateOf(Offset.Zero) }
+        val state = rememberTransformableState { zoomChange, offsetChange, _ ->
+            scale *= zoomChange
+            offset += offsetChange
+        }
+
         Dialog(
             onDismissRequest = { showZoom = false },
             properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -686,18 +741,36 @@ fun EquipoCard(equipo: Equipo) {
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black)
-                    .clickable { showZoom = false },
+                    .pointerInput(Unit) {
+                        detectTapGestures(onTap = { showZoom = false })
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 AsyncImage(
                     model = equipo.imagenUrl,
                     contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(
+                            scaleX = maxOf(1f, scale),
+                            scaleY = maxOf(1f, scale),
+                            translationX = offset.x,
+                            translationY = offset.y
+                        )
+                        .transformable(state = state)
+                        .pointerInput(Unit) {
+                            // Este pointerInput vacío evita que el tap del fondo
+                            // se active cuando tocas la imagen directamente
+                            detectTapGestures(onTap = { /* No hacer nada al tocar la imagen */ })
+                        },
                     contentScale = ContentScale.Fit
                 )
                 IconButton(
                     onClick = { showZoom = false },
-                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(16.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
                 ) {
                     Icon(Icons.Default.Close, null, tint = Color.White)
                 }
