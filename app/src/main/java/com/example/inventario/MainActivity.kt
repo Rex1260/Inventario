@@ -627,6 +627,8 @@ suspend fun subirImagen(context: Context, uri: Uri): String? {
 
 @Composable
 fun EquipoCard(equipo: Equipo) {
+    var showZoom by remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -648,7 +650,8 @@ fun EquipoCard(equipo: Equipo) {
                         .fillMaxWidth()
                         .height(200.dp)
                         .padding(vertical = 8.dp)
-                        .clip(RoundedCornerShape(8.dp)),
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { showZoom = true },
                     contentScale = ContentScale.Crop
                 )
             }
@@ -671,6 +674,34 @@ fun EquipoCard(equipo: Equipo) {
             CampoDato("Creado por (Nombre):", equipo.creadoPorNombre)
             CampoDato("Modif. por (Modelo):", equipo.modificadoPorModelo)
             CampoDato("Modif. por (Nombre):", equipo.modificadoPorNombre)
+        }
+    }
+
+    if (showZoom && !equipo.imagenUrl.isNullOrEmpty()) {
+        Dialog(
+            onDismissRequest = { showZoom = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .clickable { showZoom = false },
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = equipo.imagenUrl,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+                IconButton(
+                    onClick = { showZoom = false },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+                ) {
+                    Icon(Icons.Default.Close, null, tint = Color.White)
+                }
+            }
         }
     }
 }
