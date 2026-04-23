@@ -21,6 +21,8 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -673,21 +675,43 @@ fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeig
     return inSampleSize
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun EquipoCard(equipo: Equipo) {
+    val viewModel: InventarioViewModel = viewModel()
+    val context = LocalContext.current
     var showZoom by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = { /* Click normal no hace nada o expande si quisieras */ },
+                onLongClick = { showDeleteDialog = true }
+            ),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "INFORMACIÓN DEL EQUIPO",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.secondary,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "INFORMACIÓN DEL EQUIPO",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    fontWeight = FontWeight.Bold
+                )
+                // Icono de basura visible como indicativo
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Borrar (Mantén presionado el cuadro)",
+                    tint = Color.Gray.copy(alpha = 0.5f),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
             if (!equipo.imagenUrl.isNullOrEmpty()) {
@@ -723,6 +747,31 @@ fun EquipoCard(equipo: Equipo) {
             CampoDato("Modif. por (Modelo):", equipo.modificadoPorModelo)
             CampoDato("Modif. por (Nombre):", equipo.modificadoPorNombre)
         }
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("¿Eliminar equipo?") },
+            text = { Text("Esta acción ocultará el equipo y liberará el espacio de su imagen. ¿Deseas continuar?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.eliminarEquipoLogico(equipo, context) {
+                            showDeleteDialog = false
+                            Toast.makeText(context, "Equipo eliminado", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Text("ELIMINAR", color = Color.Red, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("CANCELAR")
+                }
+            }
+        )
     }
 
     if (showZoom && !equipo.imagenUrl.isNullOrEmpty()) {

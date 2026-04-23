@@ -45,8 +45,12 @@ class InventarioViewModel : ViewModel() {
             isLoading = true
             errorMessage = null
             try {
+                // Filtramos para traer solo los que NO están eliminados
                 val results = supabase.from("equipos")
                     .select() {
+                        filter {
+                            eq("deleted_at", "null")
+                        }
                         order("fecha_registro", Order.DESCENDING)
                     }
                     .decodeList<Equipo>()
@@ -90,17 +94,6 @@ class InventarioViewModel : ViewModel() {
         viewModelScope.launch {
             isLoading = true
             try {
-                var finalImagenUrl = ""
-                
-                // 1. Subir imagen si existe
-                imageUri?.let { uri ->
-                    val fileName = "${UUID.randomUUID()}.jpg"
-                    val bucket = supabase.storage.from("fotos_equipos")
-                    // Aquí se debería pasar el ByteArray de la imagen comprimida
-                    // Por simplicidad en este paso, asumo que tenemos el acceso a los bytes
-                    // (En la UI implementaremos la compresión)
-                }
-
                 // 2. Insertar en DB
                 val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault())
                 val now = sdf.format(Date())
@@ -114,6 +107,47 @@ class InventarioViewModel : ViewModel() {
                 onSuccess()
             } catch (e: Exception) {
                 errorMessage = "Error al guardar: ${e.message}"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun eliminarEquipoLogico(equipo: Equipo, context: android.content.Context, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                // 1. Si tiene imagen, la borramos físicamente de Storage
+                if (!equipo.imagenUrl.isNullOrEmpty()) {
+                    try {
+                        val fileName = equipo.imagenUrl.substringAfterLast("/")
+                        supabase.storage.from("fotos_equipos").delete(fileName)
+                    } catch (e: Exception) {
+                        // Si falla el borrado de imagen, continuamos con el registro
+                    }
+                }
+
+                // 2. Actualización lógica en DB
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault())
+                val now = sdf.format(Date())
+                
+                supabase.from("equipos").update(
+                    mapOf(
+                        "deleted_at" to now,
+                        "imagen_url" to null,
+                        "modificado_por_modelo" to android.os.Build.MODEL,
+                        "modificado_por_nombre" to (android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido")
+                    )
+                ) {
+                    filter {
+                        eq("id", equipo.id!!)
+                    }
+                }
+
+                fetchEquipos()
+                onSuccess()
+            } catch (e: Exception) {
+                errorMessage = "Error al eliminar: ${e.message}"
             } finally {
                 isLoading = false
             }

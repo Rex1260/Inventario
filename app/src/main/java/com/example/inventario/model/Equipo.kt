@@ -38,5 +38,7 @@ data class Equipo(
     @SerialName("modificado_por_modelo")
     val modificadoPorModelo: String? = null,
     @SerialName("modificado_por_nombre")
-    val modificadoPorNombre: String? = null
+    val modificadoPorNombre: String? = null,
+    @SerialName("deleted_at")
+    val deletedAt: String? = null
 )
