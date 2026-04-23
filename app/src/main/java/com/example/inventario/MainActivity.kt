@@ -82,127 +82,226 @@ class MainActivity : ComponentActivity() {
         setContent {
             InventarioTheme {
                 val viewModel: InventarioViewModel = viewModel()
-                val context = LocalContext.current
-                var showForm by rememberSaveable { mutableStateOf(false) }
-                var equipoAEditar by remember { mutableStateOf<Equipo?>(null) }
-                
-                LaunchedEffect(Unit) {
-                    viewModel.fetchEquipos()
-                }
+                var currentScreen by rememberSaveable { mutableStateOf("home") }
 
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    topBar = {
-                        CenterAlignedTopAppBar(
-                            title = { 
-                                Text(
-                                    if (viewModel.isTrashMode) "Papelera de Reciclaje" else "Inventario de Equipos", 
-                                    fontWeight = FontWeight.Bold
-                                ) 
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = if (viewModel.isTrashMode) Color(0xFF424242) else MaterialTheme.colorScheme.primaryContainer,
-                                titleContentColor = if (viewModel.isTrashMode) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
-                            ),
-                            actions = {
-                                IconButton(onClick = { viewModel.toggleTrashMode() }) {
-                                    Icon(
-                                        imageVector = if (viewModel.isTrashMode) Icons.Default.Inventory else Icons.Default.Delete,
-                                        contentDescription = "Cambiar modo",
-                                        tint = if (viewModel.isTrashMode) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                                IconButton(onClick = { (context as? Activity)?.finish() }) {
-                                    Icon(
-                                        Icons.Default.Close, 
-                                        contentDescription = "Cerrar Aplicación",
-                                        tint = if (viewModel.isTrashMode) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                            }
-                        )
-                    },
-                    floatingActionButton = {
-                        if (!viewModel.isTrashMode) {
-                            FloatingActionButton(onClick = { 
-                                equipoAEditar = null
-                                showForm = true 
-                            }) {
-                                Icon(Icons.Default.Add, contentDescription = "Agregar Equipo")
-                            }
-                        }
-                    }
-                ) { innerPadding ->
-                    Column(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
-                        // Cuadro de búsqueda
-                        OutlinedTextField(
-                            value = viewModel.searchQuery,
-                            onValueChange = { viewModel.searchQuery = it },
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            placeholder = { Text(if (viewModel.isTrashMode) "Buscar en Papelera..." else "Buscar por No. Inventario...") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                            singleLine = true,
-                            shape = MaterialTheme.shapes.medium
-                        )
-
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            if (viewModel.isLoading) {
-                                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                            } else if (viewModel.errorMessage != null) {
-                                // ... (resto del código de error igual)
-                                Column(
-                                    modifier = Modifier.align(Alignment.Center).padding(16.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text("Error al cargar datos", color = Color.Red, fontWeight = FontWeight.Bold)
-                                    Text(viewModel.errorMessage!!, modifier = Modifier.padding(top = 8.dp))
-                                    Button(onClick = { viewModel.fetchEquipos() }, modifier = Modifier.padding(top = 16.dp)) {
-                                        Text("Reintentar")
-                                    }
-                                }
-                            } else {
-                                if (viewModel.filteredEquipos.isEmpty()) {
-                                    Text(
-                                        text = if (viewModel.isTrashMode) "La papelera está vacía" else "No hay equipos registrados",
-                                        modifier = Modifier.align(Alignment.Center),
-                                        color = Color.Gray
-                                    )
-                                } else {
-                                    LazyColumn(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentPadding = PaddingValues(16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        items(viewModel.filteredEquipos) { equipo ->
-                                            EquipoCard(
-                                                equipo = equipo,
-                                                onEdit = {
-                                                    equipoAEditar = equipo
-                                                    showForm = true
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (showForm) {
-                        FormularioEquipo(
-                            viewModel = viewModel,
-                            equipoExistente = equipoAEditar,
-                            onDismiss = { 
-                                showForm = false
-                                equipoAEditar = null
-                            }
-                        )
-                    }
+                when (currentScreen) {
+                    "home" -> HomeScreen(
+                        onNavigateToInventario = { currentScreen = "inventario" },
+                        onNavigateToPrestamos = { currentScreen = "prestamos" }
+                    )
+                    "inventario" -> InventarioScreen(
+                        viewModel = viewModel,
+                        onBack = { currentScreen = "home" }
+                    )
+                    "prestamos" -> PrestamosScreen(
+                        onBack = { currentScreen = "home" }
+                    )
                 }
             }
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeScreen(onNavigateToInventario: () -> Unit, onNavigateToPrestamos: () -> Unit) {
+    val context = LocalContext.current
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Menú Principal", fontWeight = FontWeight.Bold) },
+                actions = {
+                    IconButton(onClick = { (context as? Activity)?.finish() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Cerrar Aplicación")
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Button(
+                onClick = onNavigateToInventario,
+                modifier = Modifier
+                    .fillMaxWidth(0.8f)
+                    .height(100.dp)
+                    .padding(8.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Inventory, null, modifier = Modifier.size(32.dp))
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text("GESTIÓN DE INVENTARIO", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Button(
+                onClick = onNavigateToPrestamos,
+                modifier = Modifier
+                    .fillMaxWidth(0.8f)
+                    .height(100.dp)
+                    .padding(8.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Assignment, null, modifier = Modifier.size(32.dp))
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text("CONTROL DE PRÉSTAMOS", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun InventarioScreen(viewModel: InventarioViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    var showForm by rememberSaveable { mutableStateOf(false) }
+    var equipoAEditar by remember { mutableStateOf<Equipo?>(null) }
+    
+    LaunchedEffect(Unit) {
+        viewModel.fetchEquipos()
+    }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { 
+                    Text(
+                        if (viewModel.isTrashMode) "Papelera de Reciclaje" else "Inventario de Equipos", 
+                        fontWeight = FontWeight.Bold
+                    ) 
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Regresar")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = if (viewModel.isTrashMode) Color(0xFF424242) else MaterialTheme.colorScheme.primaryContainer,
+                    titleContentColor = if (viewModel.isTrashMode) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                actions = {
+                    IconButton(onClick = { viewModel.toggleTrashMode() }) {
+                        Icon(
+                            imageVector = if (viewModel.isTrashMode) Icons.Default.Inventory else Icons.Default.Delete,
+                            contentDescription = "Cambiar modo",
+                            tint = if (viewModel.isTrashMode) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            if (!viewModel.isTrashMode) {
+                FloatingActionButton(onClick = { 
+                    equipoAEditar = null
+                    showForm = true 
+                }) {
+                    Icon(Icons.Default.Add, contentDescription = "Agregar Equipo")
+                }
+            }
+        }
+    ) { innerPadding ->
+        Column(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+            // Cuadro de búsqueda
+            OutlinedTextField(
+                value = viewModel.searchQuery,
+                onValueChange = { viewModel.searchQuery = it },
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                placeholder = { Text(if (viewModel.isTrashMode) "Buscar en Papelera..." else "Buscar por No. Inventario...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine = true,
+                shape = MaterialTheme.shapes.medium
+            )
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                if (viewModel.isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                } else if (viewModel.errorMessage != null) {
+                    Column(
+                        modifier = Modifier.align(Alignment.Center).padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("Error al cargar datos", color = Color.Red, fontWeight = FontWeight.Bold)
+                        Text(viewModel.errorMessage!!, modifier = Modifier.padding(top = 8.dp))
+                        Button(onClick = { viewModel.fetchEquipos() }, modifier = Modifier.padding(top = 16.dp)) {
+                            Text("Reintentar")
+                        }
+                    }
+                } else {
+                    if (viewModel.filteredEquipos.isEmpty()) {
+                        Text(
+                            text = if (viewModel.isTrashMode) "La papelera está vacía" else "No hay equipos registrados",
+                            modifier = Modifier.align(Alignment.Center),
+                            color = Color.Gray
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(viewModel.filteredEquipos) { equipo ->
+                                EquipoCard(
+                                    equipo = equipo,
+                                    onEdit = {
+                                        equipoAEditar = equipo
+                                        showForm = true
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showForm) {
+            FormularioEquipo(
+                viewModel = viewModel,
+                equipoExistente = equipoAEditar,
+                onDismiss = { 
+                    showForm = false
+                    equipoAEditar = null
+                }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PrestamosScreen(onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Control de Préstamos", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Regresar")
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
+        Box(modifier = Modifier.padding(innerPadding).fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Módulo de Préstamos en construcción...")
+        }
+    }
+}
+
 
 @Composable
 fun FormularioEquipo(
@@ -246,7 +345,7 @@ fun FormularioEquipo(
 
     // Estados para los menús desplegables
     var expandedEstado by remember { mutableStateOf(false) }
-    val estados = listOf("FUNCIONAL", "OBSOLETO", "DESCOMPUESTO")
+    val estados = listOf("FUNCIONAL", "OBSOLETO", "DESCOMPUESTO", "PRESTADO")
 
     val hasChanges = remember(
         nombre, descripcion, categoria, marca, modelo, estado, numeroSerie, noInventario, numerotag, imageUriString
@@ -386,20 +485,20 @@ fun FormularioEquipo(
                     }
                 }
 
-                // Número de Serie con OCR
-                CampoConOCR(
-                    value = numeroSerie,
-                    label = "Número de Serie",
-                    onValueChange = { numeroSerie = it.uppercase() },
-                    onOCRClick = { ocrTargetField = "serie"; showCameraOCR = true }
-                )
-
                 // Número Tag con OCR
                 CampoConOCR(
                     value = numerotag,
                     label = "Número Tag",
                     onValueChange = { numerotag = it.uppercase() },
                     onOCRClick = { ocrTargetField = "tag"; showCameraOCR = true }
+                )
+
+                // Número de Serie con OCR
+                CampoConOCR(
+                    value = numeroSerie,
+                    label = "Número de Serie",
+                    onValueChange = { numeroSerie = it.uppercase() },
+                    onOCRClick = { ocrTargetField = "serie"; showCameraOCR = true }
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -564,9 +663,11 @@ fun CameraOCRDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val recognizer = remember { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
-    var currentText by remember { mutableStateOf("") }
     
-    // Unbind camera when the dialog is closed
+    var detectedOptions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isSelecting by remember { mutableStateOf(false) }
+    var currentLiveText by remember { mutableStateOf("") }
+    
     DisposableEffect(Unit) {
         onDispose {
             val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
@@ -580,114 +681,139 @@ fun CameraOCRDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    val previewView = PreviewView(ctx)
-                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                    cameraProviderFuture.addListener({
-                        val cameraProvider = cameraProviderFuture.get()
-                        val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
-                        
-                        val imageAnalyzer = ImageAnalysis.Builder()
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .build()
-                            .also {
-                                it.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
-                                    @androidx.camera.core.ExperimentalGetImage
-                                    val mediaImage = imageProxy.image
-                                    if (mediaImage != null) {
-                                        val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-                                        recognizer.process(image)
-                                            .addOnSuccessListener { visionText ->
-                                                // Delimitamos el OCR: Buscamos el bloque de texto más central
-                                                // Consideramos la rotación: si es 90 o 270, el ancho y alto se invierten para el usuario
-                                                val rotation = imageProxy.imageInfo.rotationDegrees
-                                                val isPortrait = rotation == 90 || rotation == 270
-                                                
-                                                val displayWidth = if (isPortrait) image.height else image.width
-                                                val displayHeight = if (isPortrait) image.width else image.height
-                                                
-                                                val centerBlock = visionText.textBlocks.find { block ->
-                                                    val box = block.boundingBox ?: return@find false
+        Box(modifier = Modifier.fillMaxSize().background(if (isSelecting) MaterialTheme.colorScheme.background else Color.Black)) {
+            if (!isSelecting) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        val previewView = PreviewView(ctx)
+                        val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                        cameraProviderFuture.addListener({
+                            val cameraProvider = cameraProviderFuture.get()
+                            val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
+                            
+                            val imageAnalyzer = ImageAnalysis.Builder()
+                                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                .build()
+                                .also {
+                                    it.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
+                                        @androidx.camera.core.ExperimentalGetImage
+                                        val mediaImage = imageProxy.image
+                                        if (mediaImage != null) {
+                                            val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+                                            recognizer.process(image)
+                                                .addOnSuccessListener { visionText ->
+                                                    // Filtrar bloques en el ROI central
+                                                    val roiBlocks = visionText.textBlocks.filter { block ->
+                                                        val box = block.boundingBox ?: return@filter false
+                                                        val centerX = box.centerX()
+                                                        val centerY = box.centerY()
+                                                        
+                                                        centerX > image.width * 0.20 && centerX < image.width * 0.80 &&
+                                                        centerY > image.height * 0.30 && centerY < image.height * 0.70
+                                                    }
                                                     
-                                                    // Calculamos el centro relativo al tamaño de la imagen procesada
-                                                    val centerX = box.centerX()
-                                                    val centerY = box.centerY()
+                                                    // Guardamos todas las líneas de texto encontradas en el centro
+                                                    val allStrings = roiBlocks.flatMap { block -> 
+                                                        block.lines.map { it.text.trim().uppercase() } 
+                                                    }.filter { it.length > 2 }.distinct()
                                                     
-                                                    // ROI: 60% central horizontal y 30% central vertical
-                                                    // Ajustamos los límites para que sean más estrictos
-                                                    centerX > image.width * 0.25 && centerX < image.width * 0.75 &&
-                                                    centerY > image.height * 0.35 && centerY < image.height * 0.65
+                                                    detectedOptions = allStrings
+                                                    currentLiveText = allStrings.firstOrNull() ?: ""
                                                 }
-
-                                                val detectedText = centerBlock?.text ?: ""
-                                                if (!detectedText.isNullOrBlank()) {
-                                                    currentText = detectedText
-                                                }
-                                            }
-                                            .addOnCompleteListener { imageProxy.close() }
-                                    } else {
-                                        imageProxy.close()
+                                                .addOnCompleteListener { imageProxy.close() }
+                                        } else {
+                                            imageProxy.close()
+                                        }
                                     }
                                 }
+
+                            try {
+                                cameraProvider.unbindAll()
+                                cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalyzer)
+                            } catch (e: Exception) {
+                                Log.e("OCR", "Binding failed", e)
                             }
+                        }, ContextCompat.getMainExecutor(ctx))
+                        previewView
+                    }
+                )
+                
+                // Guía visual
+                Box(
+                    modifier = Modifier
+                        .size(width = 320.dp, height = 140.dp)
+                        .align(Alignment.Center)
+                        .border(2.dp, if (detectedOptions.isNotEmpty()) Color.Green else Color.White, RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = 0.1f))
+                )
 
-                        try {
-                            cameraProvider.unbindAll()
-                            cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalyzer)
-                        } catch (e: Exception) {
-                            Log.e("OCR", "Binding failed", e)
-                        }
-                    }, ContextCompat.getMainExecutor(ctx))
-                    previewView
-                }
-            )
-            
-            // Guía visual
-            Box(
-                modifier = Modifier
-                    .size(width = 300.dp, height = 120.dp)
-                    .align(Alignment.Center)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.White.copy(alpha = 0.2f))
-                    .border(2.dp, if (currentText.isNotEmpty()) Color.Green else Color.White, RoundedCornerShape(8.dp))
-            )
-
-            Column(
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                if (currentText.isNotEmpty()) {
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.7f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    ) {
+                Column(
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 60.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (currentLiveText.isNotEmpty()) {
                         Text(
-                            text = currentText,
+                            "Detectado: $currentLiveText",
                             color = Color.White,
-                            modifier = Modifier.padding(8.dp),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
+                            modifier = Modifier.background(Color.Black.copy(0.6f), RoundedCornerShape(8.dp)).padding(8.dp)
                         )
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+                    
+                    Button(
+                        onClick = { if (detectedOptions.isNotEmpty()) isSelecting = true },
+                        enabled = detectedOptions.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth(0.8f).height(60.dp),
+                        shape = RoundedCornerShape(30.dp)
+                    ) {
+                        Text("ESCANEAR ÁREA", fontWeight = FontWeight.Bold)
                     }
                 }
-
-                Button(
-                    onClick = { if (currentText.isNotEmpty()) onResult(currentText) },
-                    enabled = currentText.isNotEmpty(),
-                    modifier = Modifier.fillMaxWidth(0.7f).height(56.dp),
-                    shape = RoundedCornerShape(28.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            } else {
+                // Pantalla de selección de resultados
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("CAPTURAR TEXTO", fontWeight = FontWeight.Bold)
+                    Text(
+                        "Resultados Encontrados", 
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Toca el texto correcto para capturarlo",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(bottom = 24.dp)
+                    )
+
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(detectedOptions) { text ->
+                            OutlinedButton(
+                                onClick = { onResult(text) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(16.dp)
+                            ) {
+                                Text(text, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    TextButton(onClick = { isSelecting = false }) {
+                        Text("VOLVER A INTENTAR")
+                    }
                 }
             }
             
             IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
-                Icon(Icons.Default.Close, null, tint = Color.White)
+                Icon(Icons.Default.Close, null, tint = if (isSelecting) Color.Black else Color.White)
             }
         }
     }
@@ -902,8 +1028,8 @@ fun EquipoCard(equipo: Equipo, onEdit: () -> Unit) {
             CampoDato("Marca:", equipo.marca)
             CampoDato("Modelo:", equipo.modelo)
             CampoDato("Estado:", equipo.estado)
-            CampoDato("Número de Serie:", equipo.numeroSerie)
             CampoDato("Numero Tag:", equipo.numerotag)
+            CampoDato("Número de Serie:", equipo.numeroSerie)
             CampoDato("Fecha Registro:", equipo.fechaRegistro)
             CampoDato("Fecha Modificación:", equipo.fechaModificacion)
             
