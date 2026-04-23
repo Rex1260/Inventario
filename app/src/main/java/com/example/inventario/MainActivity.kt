@@ -602,18 +602,24 @@ fun CameraOCRDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
                                         recognizer.process(image)
                                             .addOnSuccessListener { visionText ->
                                                 // Delimitamos el OCR: Buscamos el bloque de texto más central
-                                                val imageWidth = image.width
-                                                val imageHeight = image.height
+                                                // Consideramos la rotación: si es 90 o 270, el ancho y alto se invierten para el usuario
+                                                val rotation = imageProxy.imageInfo.rotationDegrees
+                                                val isPortrait = rotation == 90 || rotation == 270
+                                                
+                                                val displayWidth = if (isPortrait) image.height else image.width
+                                                val displayHeight = if (isPortrait) image.width else image.height
                                                 
                                                 val centerBlock = visionText.textBlocks.find { block ->
                                                     val box = block.boundingBox ?: return@find false
+                                                    
+                                                    // Calculamos el centro relativo al tamaño de la imagen procesada
                                                     val centerX = box.centerX()
                                                     val centerY = box.centerY()
                                                     
-                                                    // Solo aceptamos texto que esté en el 60% central horizontal 
-                                                    // y 40% central vertical de la imagen (ROI delimitada)
-                                                    centerX > imageWidth * 0.2 && centerX < imageWidth * 0.8 &&
-                                                    centerY > imageHeight * 0.3 && centerY < imageHeight * 0.7
+                                                    // ROI: 60% central horizontal y 30% central vertical
+                                                    // Ajustamos los límites para que sean más estrictos
+                                                    centerX > image.width * 0.25 && centerX < image.width * 0.75 &&
+                                                    centerY > image.height * 0.35 && centerY < image.height * 0.65
                                                 }
 
                                                 val detectedText = centerBlock?.text ?: ""
