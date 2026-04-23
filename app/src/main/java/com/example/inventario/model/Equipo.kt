@@ -30,5 +30,13 @@ data class Equipo(
     @SerialName("fecha_modificacion")
     val fechaModificacion: String? = null,
     @SerialName("imagen_url")
-    val imagenUrl: String? = null
+    val imagenUrl: String? = null,
+    @SerialName("creado_por_modelo")
+    val creadoPorModelo: String? = null,
+    @SerialName("creado_por_nombre")
+    val creadoPorNombre: String? = null,
+    @SerialName("modificado_por_modelo")
+    val modificadoPorModelo: String? = null,
+    @SerialName("modificado_por_nombre")
+    val modificadoPorNombre: String? = null
 )

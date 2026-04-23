@@ -334,7 +334,11 @@ fun FormularioEquipo(viewModel: InventarioViewModel, onDismiss: () -> Unit) {
                                     numeroSerie = numeroSerie,
                                     numerotag = numerotag,
                                     noInventario = noInventario,
-                                    imagenUrl = url
+                                    imagenUrl = url,
+                                    creadoPorModelo = android.os.Build.MODEL,
+                                    creadoPorNombre = android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido",
+                                    modificadoPorModelo = android.os.Build.MODEL,
+                                    modificadoPorNombre = android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido"
                                 )
                                 viewModel.guardarEquipo(nuevoEquipo, null) {
                                     onDismiss()
@@ -617,6 +621,13 @@ fun EquipoCard(equipo: Equipo) {
             CampoDato("Numero Tag:", equipo.numerotag)
             CampoDato("Fecha Registro:", equipo.fechaRegistro)
             CampoDato("Fecha Modificación:", equipo.fechaModificacion)
+            
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            Text("Registro de Auditoría", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            CampoDato("Creado por (Modelo):", equipo.creadoPorModelo)
+            CampoDato("Creado por (Nombre):", equipo.creadoPorNombre)
+            CampoDato("Modif. por (Modelo):", equipo.modificadoPorModelo)
+            CampoDato("Modif. por (Nombre):", equipo.modificadoPorNombre)
         }
     }
 }
