@@ -93,21 +93,39 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
                         CenterAlignedTopAppBar(
-                            title = { Text("Inventario de Equipos", fontWeight = FontWeight.Bold) },
+                            title = { 
+                                Text(
+                                    if (viewModel.isTrashMode) "Papelera de Reciclaje" else "Inventario de Equipos", 
+                                    fontWeight = FontWeight.Bold
+                                ) 
+                            },
                             colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                containerColor = if (viewModel.isTrashMode) Color(0xFF424242) else MaterialTheme.colorScheme.primaryContainer,
+                                titleContentColor = if (viewModel.isTrashMode) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
                             ),
                             actions = {
+                                IconButton(onClick = { viewModel.toggleTrashMode() }) {
+                                    Icon(
+                                        imageVector = if (viewModel.isTrashMode) Icons.Default.Inventory else Icons.Default.Delete,
+                                        contentDescription = "Cambiar modo",
+                                        tint = if (viewModel.isTrashMode) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
                                 IconButton(onClick = { (context as? Activity)?.finish() }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Cerrar Aplicación")
+                                    Icon(
+                                        Icons.Default.Close, 
+                                        contentDescription = "Cerrar Aplicación",
+                                        tint = if (viewModel.isTrashMode) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
                                 }
                             }
                         )
                     },
                     floatingActionButton = {
-                        FloatingActionButton(onClick = { showForm = true }) {
-                            Icon(Icons.Default.Add, contentDescription = "Agregar Equipo")
+                        if (!viewModel.isTrashMode) {
+                            FloatingActionButton(onClick = { showForm = true }) {
+                                Icon(Icons.Default.Add, contentDescription = "Agregar Equipo")
+                            }
                         }
                     }
                 ) { innerPadding ->
@@ -117,7 +135,7 @@ class MainActivity : ComponentActivity() {
                             value = viewModel.searchQuery,
                             onValueChange = { viewModel.searchQuery = it },
                             modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            placeholder = { Text("Buscar por No. Inventario...") },
+                            placeholder = { Text(if (viewModel.isTrashMode) "Buscar en Papelera..." else "Buscar por No. Inventario...") },
                             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                             singleLine = true,
                             shape = MaterialTheme.shapes.medium
@@ -127,6 +145,7 @@ class MainActivity : ComponentActivity() {
                             if (viewModel.isLoading) {
                                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                             } else if (viewModel.errorMessage != null) {
+                                // ... (resto del código de error igual)
                                 Column(
                                     modifier = Modifier.align(Alignment.Center).padding(16.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
@@ -138,13 +157,21 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             } else {
-                                LazyColumn(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentPadding = PaddingValues(16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    items(viewModel.filteredEquipos) { equipo ->
-                                        EquipoCard(equipo)
+                                if (viewModel.filteredEquipos.isEmpty()) {
+                                    Text(
+                                        text = if (viewModel.isTrashMode) "La papelera está vacía" else "No hay equipos registrados",
+                                        modifier = Modifier.align(Alignment.Center),
+                                        color = Color.Gray
+                                    )
+                                } else {
+                                    LazyColumn(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentPadding = PaddingValues(16.dp),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        items(viewModel.filteredEquipos) { equipo ->
+                                            EquipoCard(equipo)
+                                        }
                                     }
                                 }
                             }
@@ -682,15 +709,31 @@ fun EquipoCard(equipo: Equipo) {
     val context = LocalContext.current
     var showZoom by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showRestoreDialog by remember { mutableStateOf(false) }
+    var showPermanentDeleteDialog by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
-                onClick = { /* Click normal no hace nada o expande si quisieras */ },
-                onLongClick = { showDeleteDialog = true }
+                onClick = { /* Zoom si no está borrado o lo que prefieras */ },
+                onLongClick = { 
+                    if (viewModel.isTrashMode) {
+                        showRestoreDialog = true
+                    } else {
+                        showDeleteDialog = true 
+                    }
+                }
+            )
+            .border(
+                width = if (viewModel.isTrashMode) 1.dp else 0.dp,
+                color = if (viewModel.isTrashMode) Color.Red.copy(alpha = 0.5f) else Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
             ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (viewModel.isTrashMode) Color(0xFFF5F5F5) else MaterialTheme.colorScheme.surface
+        )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -699,21 +742,33 @@ fun EquipoCard(equipo: Equipo) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "INFORMACIÓN DEL EQUIPO",
+                    text = if (viewModel.isTrashMode) "EQUIPO ELIMINADO" else "INFORMACIÓN DEL EQUIPO",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary,
+                    color = if (viewModel.isTrashMode) Color.Red else MaterialTheme.colorScheme.secondary,
                     fontWeight = FontWeight.Bold
                 )
-                // Icono de basura visible como indicativo
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Borrar (Mantén presionado el cuadro)",
-                    tint = Color.Gray.copy(alpha = 0.5f),
-                    modifier = Modifier.size(16.dp)
-                )
+                
+                if (viewModel.isTrashMode) {
+                    Row {
+                        IconButton(onClick = { showRestoreDialog = true }) {
+                            Icon(Icons.Default.RestoreFromTrash, "Restaurar", tint = Color.DarkGray)
+                        }
+                        IconButton(onClick = { showPermanentDeleteDialog = true }) {
+                            Icon(Icons.Default.DeleteForever, "Borrar Permanente", tint = Color.Red)
+                        }
+                    }
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Mantén presionado para borrar",
+                        tint = Color.Gray.copy(alpha = 0.3f),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
+            
+            // ... (Imagen y campos igual)
             if (!equipo.imagenUrl.isNullOrEmpty()) {
                 AsyncImage(
                     model = equipo.imagenUrl,
@@ -723,10 +778,11 @@ fun EquipoCard(equipo: Equipo) {
                         .height(200.dp)
                         .padding(vertical = 8.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable { showZoom = true },
+                        .clickable { if (!viewModel.isTrashMode) showZoom = true },
                     contentScale = ContentScale.Crop
                 )
             }
+            // ... (campos de datos)
 
             CampoDato("No. Inventario:", equipo.noInventario)
             CampoDato("Nombre:", equipo.nombre)
@@ -770,6 +826,44 @@ fun EquipoCard(equipo: Equipo) {
                 TextButton(onClick = { showDeleteDialog = false }) {
                     Text("CANCELAR")
                 }
+            }
+        )
+    }
+
+    if (showRestoreDialog) {
+        AlertDialog(
+            onDismissRequest = { showRestoreDialog = false },
+            title = { Text("¿Restaurar equipo?") },
+            text = { Text("El equipo volverá a aparecer en la lista principal.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.restaurarEquipo(equipo, context) {
+                        showRestoreDialog = false
+                        Toast.makeText(context, "Equipo restaurado", Toast.LENGTH_SHORT).show()
+                    }
+                }) { Text("RESTAURAR", fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRestoreDialog = false }) { Text("CANCELAR") }
+            }
+        )
+    }
+
+    if (showPermanentDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showPermanentDeleteDialog = false },
+            title = { Text("¿ELIMINAR DEFINITIVAMENTE?") },
+            text = { Text("Esta acción es IRREVERSIBLE. El registro desaparecerá de la base de datos para siempre.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.eliminarFisico(equipo) {
+                        showPermanentDeleteDialog = false
+                        Toast.makeText(context, "Eliminado permanentemente", Toast.LENGTH_SHORT).show()
+                    }
+                }) { Text("ELIMINAR PARA SIEMPRE", color = Color.Red, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermanentDeleteDialog = false }) { Text("CANCELAR") }
             }
         )
     }

@@ -25,6 +25,7 @@ class InventarioViewModel : ViewModel() {
     var isLoading by mutableStateOf(false)
     var errorMessage by mutableStateOf<String?>(null)
     var searchQuery by mutableStateOf("")
+    var isTrashMode by mutableStateOf(false)
 
     // Listas para sugerencias
     val categoriasExistentes = mutableStateListOf<String>()
@@ -46,11 +47,17 @@ class InventarioViewModel : ViewModel() {
             isLoading = true
             errorMessage = null
             try {
-                // Filtramos para traer solo los que NO están eliminados (deleted_at es NULL)
+                // Filtramos según el modo (Normal o Papelera)
                 val results = supabase.from("equipos")
                     .select() {
                         filter {
-                            filter("deleted_at", FilterOperator.IS, null)
+                            if (isTrashMode) {
+                                // Modo Papelera: los que SÍ están eliminados (deleted_at NO es NULL)
+                                filterNot("deleted_at", FilterOperator.IS, null)
+                            } else {
+                                // Modo Normal: los que NO están eliminados (deleted_at ES NULL)
+                                filter("deleted_at", FilterOperator.IS, null)
+                            }
                         }
                         order("fecha_registro", Order.DESCENDING)
                     }
@@ -58,17 +65,64 @@ class InventarioViewModel : ViewModel() {
                 _equipos.clear()
                 _equipos.addAll(results)
                 
-                // Actualizar listas de sugerencias
-                categoriasExistentes.clear()
-                categoriasExistentes.addAll(results.mapNotNull { it.categoria }.distinct())
-                marcasExistentes.clear()
-                marcasExistentes.addAll(results.mapNotNull { it.marca }.distinct())
-                modelosExistentes.clear()
-                modelosExistentes.addAll(results.mapNotNull { it.modelo }.distinct())
+                // Actualizar sugerencias solo con equipos activos para que no salgan cosas borradas
+                if (!isTrashMode) {
+                    categoriasExistentes.clear()
+                    categoriasExistentes.addAll(results.mapNotNull { it.categoria }.distinct())
+                    marcasExistentes.clear()
+                    marcasExistentes.addAll(results.mapNotNull { it.marca }.distinct())
+                    modelosExistentes.clear()
+                    modelosExistentes.addAll(results.mapNotNull { it.modelo }.distinct())
+                }
                 
             } catch (e: Exception) {
                 errorMessage = "Error: ${e.message}"
                 e.printStackTrace()
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun toggleTrashMode() {
+        isTrashMode = !isTrashMode
+        fetchEquipos()
+    }
+
+    fun restaurarEquipo(equipo: Equipo, context: android.content.Context, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                supabase.from("equipos").update(
+                    mapOf(
+                        "deleted_at" to null,
+                        "modificado_por_modelo" to android.os.Build.MODEL,
+                        "modificado_por_nombre" to (android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido")
+                    )
+                ) {
+                    filter { eq("id", equipo.id!!) }
+                }
+                fetchEquipos()
+                onSuccess()
+            } catch (e: Exception) {
+                errorMessage = "Error al restaurar: ${e.message}"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun eliminarFisico(equipo: Equipo, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                supabase.from("equipos").delete {
+                    filter { eq("id", equipo.id!!) }
+                }
+                fetchEquipos()
+                onSuccess()
+            } catch (e: Exception) {
+                errorMessage = "Error en borrado permanente: ${e.message}"
             } finally {
                 isLoading = false
             }
