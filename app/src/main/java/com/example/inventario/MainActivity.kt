@@ -451,6 +451,19 @@ fun CameraOCRDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
     val recognizer = remember { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
     var currentText by remember { mutableStateOf("") }
     
+    // Unbind camera when the dialog is closed
+    DisposableEffect(Unit) {
+        onDispose {
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+            try {
+                val cameraProvider = cameraProviderFuture.get()
+                cameraProvider.unbindAll()
+            } catch (e: Exception) {
+                Log.e("OCR", "Error unbinding camera", e)
+            }
+        }
+    }
+
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             AndroidView(
