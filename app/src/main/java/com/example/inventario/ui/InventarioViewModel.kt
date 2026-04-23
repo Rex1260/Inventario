@@ -1,5 +1,6 @@
 package com.example.inventario.ui
 
+import android.net.Uri
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -7,10 +8,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.inventario.model.Equipo
 import com.example.inventario.data.supabase
+import com.example.inventario.model.Equipo
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 
 class InventarioViewModel : ViewModel() {
     private val _equipos = mutableStateListOf<Equipo>()
@@ -18,12 +25,15 @@ class InventarioViewModel : ViewModel() {
     var errorMessage by mutableStateOf<String?>(null)
     var searchQuery by mutableStateOf("")
 
+    // Listas para sugerencias
+    val categoriasExistentes = mutableStateListOf<String>()
+    val marcasExistentes = mutableStateListOf<String>()
+    val modelosExistentes = mutableStateListOf<String>()
+
     val filteredEquipos by derivedStateOf {
         if (searchQuery.isBlank()) {
-            // Si no hay búsqueda, mostramos solo el último registro (el primero de la lista si ordenamos DESC)
             if (_equipos.isNotEmpty()) listOf(_equipos.first()) else emptyList()
         } else {
-            // Si hay búsqueda, mostramos los que coincidan
             _equipos.filter { equipo ->
                 equipo.noInventario?.contains(searchQuery, ignoreCase = true) == true
             }
@@ -35,17 +45,75 @@ class InventarioViewModel : ViewModel() {
             isLoading = true
             errorMessage = null
             try {
-                // Ordenamos por id o fecha de forma descendente para tener el último arriba
                 val results = supabase.from("equipos")
                     .select() {
-                        order("fecha_registro", io.github.jan.supabase.postgrest.query.Order.DESCENDING)
+                        order("fecha_registro", Order.DESCENDING)
                     }
                     .decodeList<Equipo>()
                 _equipos.clear()
                 _equipos.addAll(results)
+                
+                // Actualizar listas de sugerencias
+                categoriasExistentes.clear()
+                categoriasExistentes.addAll(results.mapNotNull { it.categoria }.distinct())
+                marcasExistentes.clear()
+                marcasExistentes.addAll(results.mapNotNull { it.marca }.distinct())
+                modelosExistentes.clear()
+                modelosExistentes.addAll(results.mapNotNull { it.modelo }.distinct())
+                
             } catch (e: Exception) {
                 errorMessage = "Error: ${e.message}"
                 e.printStackTrace()
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun sugerirSiguienteNumero(prefijo: String): String {
+        if (prefijo.length != 3) return ""
+        val maxNumero = _equipos
+            .filter { it.noInventario?.startsWith(prefijo, ignoreCase = true) == true }
+            .mapNotNull { 
+                it.noInventario?.substring(3)?.toIntOrNull()
+            }
+            .maxOrNull() ?: 0
+        
+        return prefijo.uppercase() + (maxNumero + 1).toString().padStart(5, '0')
+    }
+
+    fun guardarEquipo(
+        equipo: Equipo,
+        imageUri: Uri?,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                var finalImagenUrl = ""
+                
+                // 1. Subir imagen si existe
+                imageUri?.let { uri ->
+                    val fileName = "${UUID.randomUUID()}.jpg"
+                    val bucket = supabase.storage.from("fotos_equipos")
+                    // Aquí se debería pasar el ByteArray de la imagen comprimida
+                    // Por simplicidad en este paso, asumo que tenemos el acceso a los bytes
+                    // (En la UI implementaremos la compresión)
+                }
+
+                // 2. Insertar en DB
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault())
+                val now = sdf.format(Date())
+                val equipoConFechas = equipo.copy(
+                    fechaRegistro = now,
+                    fechaModificacion = now
+                )
+                
+                supabase.from("equipos").insert(equipoConFechas)
+                fetchEquipos()
+                onSuccess()
+            } catch (e: Exception) {
+                errorMessage = "Error al guardar: ${e.message}"
             } finally {
                 isLoading = false
             }
