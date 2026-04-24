@@ -94,6 +94,7 @@ class MainActivity : ComponentActivity() {
                         onBack = { currentScreen = "home" }
                     )
                     "prestamos" -> PrestamosScreen(
+                        viewModel = viewModel,
                         onBack = { currentScreen = "home" }
                     )
                 }
@@ -283,24 +284,131 @@ fun InventarioScreen(viewModel: InventarioViewModel, onBack: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PrestamosScreen(onBack: () -> Unit) {
+fun PrestamosScreen(viewModel: InventarioViewModel, onBack: () -> Unit) {
+    var searchQuery by remember { mutableStateOf("") }
+    
+    val filteredDisponibles by remember(searchQuery, viewModel.equiposDisponiblesParaPrestamo) {
+        derivedStateOf {
+            if (searchQuery.isBlank()) {
+                viewModel.equiposDisponiblesParaPrestamo
+            } else {
+                viewModel.equiposDisponiblesParaPrestamo.filter { 
+                    it.noInventario?.contains(searchQuery, ignoreCase = true) == true 
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.fetchEquipos()
+    }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Control de Préstamos", fontWeight = FontWeight.Bold) },
+                title = { Text("Préstamo de Equipos", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Regresar")
                     }
+                },
+                actions = {
+                    if (viewModel.equiposSeleccionados.isNotEmpty()) {
+                        Badge(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = Color.White,
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            Text("${viewModel.equiposSeleccionados.size}")
+                        }
+                    }
                 }
             )
+        },
+        floatingActionButton = {
+            if (viewModel.equiposSeleccionados.isNotEmpty()) {
+                ExtendedFloatingActionButton(
+                    onClick = { /* Próxima fase: Formulario de Salida */ },
+                    icon = { Icon(Icons.Default.Check, null) },
+                    text = { Text("CONTINUAR PRÉSTAMO") }
+                )
+            }
         }
     ) { innerPadding ->
-        Box(modifier = Modifier.padding(innerPadding).fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Módulo de Préstamos en construcción...")
+        Column(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                placeholder = { Text("Buscar No. Inventario para préstamo...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine = true,
+                shape = MaterialTheme.shapes.medium
+            )
+
+            if (filteredDisponibles.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        if (searchQuery.isEmpty()) "No hay equipos funcionales disponibles" 
+                        else "No se encontró el equipo",
+                        color = Color.Gray
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(filteredDisponibles) { equipo ->
+                        val isSelected = viewModel.equiposSeleccionados.contains(equipo)
+                        EquipoSeleccionCard(
+                            equipo = equipo,
+                            isSelected = isSelected,
+                            onSelect = { viewModel.toggleSeleccion(equipo) }
+                        )
+                    }
+                }
+            }
         }
     }
 }
+
+@Composable
+fun EquipoSeleccionCard(equipo: Equipo, isSelected: Boolean, onSelect: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelect() }
+            .border(
+                width = if (isSelected) 2.dp else 0.dp,
+                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
+            ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) 
+                            else MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = { onSelect() }
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
+                Text(equipo.noInventario ?: "S/N", fontWeight = FontWeight.Bold)
+                Text(equipo.nombre ?: "Sin nombre", style = MaterialTheme.typography.bodyMedium)
+                Text("${equipo.marca} ${equipo.modelo}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            }
+        }
+    }
+}
+
 
 
 @Composable

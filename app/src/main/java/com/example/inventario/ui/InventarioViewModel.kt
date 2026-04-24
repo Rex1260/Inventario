@@ -27,6 +27,9 @@ class InventarioViewModel : ViewModel() {
     var searchQuery by mutableStateOf("")
     var isTrashMode by mutableStateOf(false)
 
+    // Selección para préstamos
+    val equiposSeleccionados = mutableStateListOf<Equipo>()
+
     // Listas para sugerencias
     val categoriasExistentes = mutableStateListOf<String>()
     val marcasExistentes = mutableStateListOf<String>()
@@ -39,6 +42,19 @@ class InventarioViewModel : ViewModel() {
             _equipos.filter { equipo ->
                 equipo.noInventario?.contains(searchQuery, ignoreCase = true) == true
             }
+        }
+    }
+
+    // Equipos disponibles para préstamo (FUNCIONAL y no eliminados)
+    val equiposDisponiblesParaPrestamo by derivedStateOf {
+        _equipos.filter { it.estado == "FUNCIONAL" && it.deletedAt == null }
+    }
+
+    fun toggleSeleccion(equipo: Equipo) {
+        if (equiposSeleccionados.contains(equipo)) {
+            equiposSeleccionados.remove(equipo)
+        } else {
+            equiposSeleccionados.add(equipo)
         }
     }
 
@@ -64,6 +80,9 @@ class InventarioViewModel : ViewModel() {
                     .decodeList<Equipo>()
                 _equipos.clear()
                 _equipos.addAll(results)
+                
+                // Limpiar selección si los equipos ya no están en la lista (por si acaso)
+                equiposSeleccionados.removeAll { sel -> !results.any { it.id == sel.id } }
                 
                 // Actualizar sugerencias solo con equipos activos para que no salgan cosas borradas
                 if (!isTrashMode) {
