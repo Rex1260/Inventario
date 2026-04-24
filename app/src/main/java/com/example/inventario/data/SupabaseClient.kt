@@ -3,6 +3,7 @@ package com.example.inventario.data
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.storage.Storage
+import io.github.jan.supabase.functions.Functions
 
 val supabase = createSupabaseClient(
     supabaseUrl = "https://gtzqekmewuwxcpyrojpn.supabase.co",
@@ -10,4 +11,5 @@ val supabase = createSupabaseClient(
 ) {
     install(Postgrest)
     install(Storage)
+    install(Functions)
 }

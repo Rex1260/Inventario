@@ -16,6 +16,7 @@ import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.storage.storage
+import io.github.jan.supabase.functions.functions
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -199,6 +200,29 @@ class InventarioViewModel : ViewModel() {
                     supabase.from("equipos").update(mapOf("estado" to "PRESTADO")) {
                         filter { eq("id", equipo.id!!) }
                     }
+                }
+
+                // 4. Llamar a la Edge Function para enviar el correo
+                try {
+                    val listaEquipos = equiposSeleccionados.map {
+                        mapOf(
+                            "no_inventario" to it.noInventario,
+                            "nombre" to it.nombre,
+                            "marca" to it.marca,
+                            "modelo" to it.modelo
+                        )
+                    }
+                    val payload = mapOf(
+                        "folio" to folio,
+                        "nombre" to nombre.uppercase(),
+                        "firma_url" to firmaUrl,
+                        "equipos" to listaEquipos
+                    )
+                    supabase.functions.invoke("send-loan-contract", payload)
+                    Log.d("Prestamo", "Edge Function llamada con éxito")
+                } catch (e: Exception) {
+                    Log.e("Prestamo", "Error al llamar Edge Function: ${e.message}")
+                    // No bloqueamos el éxito del préstamo si solo falla el correo
                 }
 
                 equiposSeleccionados.clear()
