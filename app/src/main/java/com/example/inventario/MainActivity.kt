@@ -46,7 +46,9 @@ import androidx.compose.foundation.gestures.transformable
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -73,6 +75,13 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+
+import androidx.compose.ui.graphics.*
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.Canvas
+import android.graphics.Paint
+import android.graphics.Rect
+import androidx.compose.runtime.snapshots.SnapshotStateList
 
 class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -286,6 +295,7 @@ fun InventarioScreen(viewModel: InventarioViewModel, onBack: () -> Unit) {
 @Composable
 fun PrestamosScreen(viewModel: InventarioViewModel, onBack: () -> Unit) {
     var searchQuery by remember { mutableStateOf("") }
+    var showLoanForm by remember { mutableStateOf(false) }
     
     val filteredDisponibles by remember(searchQuery, viewModel.equiposDisponiblesParaPrestamo) {
         derivedStateOf {
@@ -328,7 +338,7 @@ fun PrestamosScreen(viewModel: InventarioViewModel, onBack: () -> Unit) {
         floatingActionButton = {
             if (viewModel.equiposSeleccionados.isNotEmpty()) {
                 ExtendedFloatingActionButton(
-                    onClick = { /* Próxima fase: Formulario de Salida */ },
+                    onClick = { showLoanForm = true },
                     icon = { Icon(Icons.Default.Check, null) },
                     text = { Text("CONTINUAR PRÉSTAMO") }
                 )
@@ -371,6 +381,17 @@ fun PrestamosScreen(viewModel: InventarioViewModel, onBack: () -> Unit) {
                 }
             }
         }
+
+        if (showLoanForm) {
+            FormularioResguardo(
+                viewModel = viewModel,
+                onDismiss = { showLoanForm = false },
+                onSuccess = {
+                    showLoanForm = false
+                    onBack() // Regresar al menú principal tras el éxito
+                }
+            )
+        }
     }
 }
 
@@ -408,6 +429,221 @@ fun EquipoSeleccionCard(equipo: Equipo, isSelected: Boolean, onSelect: () -> Uni
         }
     }
 }
+
+@Composable
+fun FormularioResguardo(
+    viewModel: InventarioViewModel,
+    onDismiss: () -> Unit,
+    onSuccess: () -> Unit
+) {
+    val context = LocalContext.current
+    var nombreComodatario by rememberSaveable { mutableStateOf("") }
+    var points = remember { mutableStateListOf<Offset>() }
+    val coroutineScope = rememberCoroutineScope()
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.ArrowBack, null) }
+                    Text("Detalle del Resguardo", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text("Equipos seleccionados:", fontWeight = FontWeight.Bold)
+                viewModel.equiposSeleccionados.forEach {
+                    Text("• ${it.noInventario} - ${it.nombre}", style = MaterialTheme.typography.bodyMedium)
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                ExposedDropdownSugerencias(
+                    value = nombreComodatario,
+                    label = "Nombre del Comodatario",
+                    options = viewModel.nombresConPrestamosActivos,
+                    onValueChange = { nombreComodatario = it.uppercase() }
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text("Firma de Conformidad:", fontWeight = FontWeight.Bold)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(250.dp)
+                        .border(1.dp, Color.Gray, RoundedCornerShape(8.dp))
+                        .background(Color.White)
+                ) {
+                    SignatureCanvas(
+                        points = points,
+                        onPointsChange = { points.add(it) }
+                    )
+                    
+                    TextButton(
+                        onClick = { points.clear() },
+                        modifier = Modifier.align(Alignment.TopEnd)
+                    ) {
+                        Text("LIMPIAR", color = Color.Red)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                Button(
+                    onClick = {
+                        if (nombreComodatario.isNotBlank() && points.isNotEmpty()) {
+                            coroutineScope.launch {
+                                // Generar firma con marcas de agua
+                                val bitmap = generateSignatureBitmap(
+                                    points = points,
+                                    nombre = nombreComodatario,
+                                    equipos = viewModel.equiposSeleccionados
+                                )
+                                val bos = ByteArrayOutputStream()
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, 70, bos)
+                                val firmaBytes = bos.toByteArray()
+
+                                viewModel.realizarPrestamo(
+                                    nombre = nombreComodatario,
+                                    firmaBytes = firmaBytes,
+                                    dispositivoModelo = android.os.Build.MODEL,
+                                    dispositivoNombre = android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido",
+                                    onSuccess = {
+                                        Toast.makeText(context, "Préstamo registrado y correo enviado", Toast.LENGTH_LONG).show()
+                                        onSuccess()
+                                    }
+                                )
+                            }
+                        } else {
+                            Toast.makeText(context, "Falta nombre o firma", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    enabled = !viewModel.isLoading,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (viewModel.isLoading) CircularProgressIndicator(color = Color.White)
+                    else Text("FINALIZAR PRÉSTAMO Y ENVIAR CORREO")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SignatureCanvas(points: SnapshotStateList<Offset>, onPointsChange: (Offset) -> Unit) {
+    Canvas(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = { offset ->
+                        onPointsChange(offset)
+                    }
+                )
+            }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { offset: Offset -> onPointsChange(offset) },
+                    onDrag = { change: androidx.compose.ui.input.pointer.PointerInputChange, _: Offset ->
+                        onPointsChange(change.position)
+                    },
+                    onDragEnd = { onPointsChange(Offset.Unspecified) }
+                )
+            }
+    ) {
+        val path = Path()
+        var isFirst = true
+        points.forEach { point ->
+            if (point == Offset.Unspecified) {
+                isFirst = true
+            } else {
+                if (isFirst) {
+                    path.moveTo(point.x, point.y)
+                    isFirst = false
+                } else {
+                    path.lineTo(point.x, point.y)
+                }
+            }
+        }
+        drawPath(
+            path = path,
+            color = Color.Black,
+            style = Stroke(width = 5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+}
+
+fun generateSignatureBitmap(
+    points: List<Offset>,
+    nombre: String,
+    equipos: List<Equipo>
+): Bitmap {
+    val width = 800
+    val height = 600
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    canvas.drawColor(android.graphics.Color.WHITE)
+
+    val paint = Paint().apply {
+        color = android.graphics.Color.BLACK
+        strokeWidth = 5f
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        isAntiAlias = true
+    }
+
+    // Dibujar trazo
+    val path = android.graphics.Path()
+    var isFirst = true
+    points.forEach { point ->
+        if (point == Offset.Unspecified) {
+            isFirst = true
+        } else {
+            if (isFirst) {
+                path.moveTo(point.x * (width / 1000f), point.y * (height / 1000f)) // Escalar si es necesario
+                // Ajuste: para simplificar, asumimos que los puntos ya vienen en escala o el lienzo es fijo
+                path.moveTo(point.x, point.y)
+                isFirst = false
+            } else {
+                path.lineTo(point.x, point.y)
+            }
+        }
+    }
+    canvas.drawPath(path, paint)
+
+    // Dibujar Marcas de Agua (Texto)
+    val textPaint = Paint().apply {
+        color = android.graphics.Color.DKGRAY
+        textSize = 24f
+        isAntiAlias = true
+    }
+    
+    val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+    val dateStr = sdf.format(Date())
+    
+    canvas.drawText("Comodatario: $nombre", 20f, height - 80f, textPaint)
+    canvas.drawText("Fecha: $dateStr", 20f, height - 50f, textPaint)
+    
+    val equiposStr = "Equipos: " + equipos.joinToString(", ") { it.noInventario ?: "" }
+    canvas.drawText(equiposStr, 20f, height - 20f, textPaint)
+
+    return bitmap
+}
+
 
 
 

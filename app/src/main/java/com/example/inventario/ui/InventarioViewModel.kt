@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.inventario.data.supabase
 import com.example.inventario.model.Equipo
+import com.example.inventario.model.Prestamo
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
@@ -29,6 +30,9 @@ class InventarioViewModel : ViewModel() {
 
     // Selección para préstamos
     val equiposSeleccionados = mutableStateListOf<Equipo>()
+    
+    // Nombres de personas con préstamos activos para sugerencias
+    val nombresConPrestamosActivos = mutableStateListOf<String>()
 
     // Listas para sugerencias
     val categoriasExistentes = mutableStateListOf<String>()
@@ -81,9 +85,6 @@ class InventarioViewModel : ViewModel() {
                 _equipos.clear()
                 _equipos.addAll(results)
                 
-                // Limpiar selección si los equipos ya no están en la lista (por si acaso)
-                equiposSeleccionados.removeAll { sel -> !results.any { it.id == sel.id } }
-                
                 // Actualizar sugerencias solo con equipos activos para que no salgan cosas borradas
                 if (!isTrashMode) {
                     categoriasExistentes.clear()
@@ -93,10 +94,113 @@ class InventarioViewModel : ViewModel() {
                     modelosExistentes.clear()
                     modelosExistentes.addAll(results.mapNotNull { it.modelo }.distinct())
                 }
+
+                // Cargar nombres con préstamos activos
+                val prestamosActivos = supabase.from("prestamos")
+                    .select() {
+                        filter { eq("estado", "activo") }
+                    }.decodeList<Prestamo>()
+                
+                nombresConPrestamosActivos.clear()
+                nombresConPrestamosActivos.addAll(prestamosActivos.mapNotNull { it.nombreComodatario }.distinct())
                 
             } catch (e: Exception) {
                 errorMessage = "Error: ${e.message}"
                 e.printStackTrace()
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    suspend fun obtenerFolioParaUsuario(nombre: String): String {
+        return try {
+            val prestamoExistente = supabase.from("prestamos")
+                .select() {
+                    filter {
+                        eq("nombre_comodatario", nombre.uppercase())
+                        eq("estado", "activo")
+                    }
+                    limit(1)
+                }.decodeSingleOrNull<Prestamo>()
+            
+            if (prestamoExistente != null) {
+                prestamoExistente.folio ?: "FOLIO-ERROR"
+            } else {
+                generarNuevoFolio()
+            }
+        } catch (e: Exception) {
+            generarNuevoFolio()
+        }
+    }
+
+    private suspend fun generarNuevoFolio(): String {
+        val year = SimpleDateFormat("yyyy", Locale.getDefault()).format(Date())
+        val count = try {
+            val results = supabase.from("prestamos")
+                .select() {
+                    filter {
+                        ilike("folio", "PR-$year-%")
+                    }
+                }.decodeList<Prestamo>()
+            
+            val maxNum = results.mapNotNull { 
+                it.folio?.substringAfterLast("-")?.toIntOrNull() 
+            }.maxOrNull() ?: 0
+            maxNum + 1
+        } catch (e: Exception) {
+            1
+        }
+        return "PR-$year-${count.toString().padStart(5, '0')}"
+    }
+
+    fun realizarPrestamo(
+        nombre: String,
+        firmaBytes: ByteArray,
+        dispositivoModelo: String,
+        dispositivoNombre: String,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                // 1. Obtener Folio
+                val folio = obtenerFolioParaUsuario(nombre)
+                
+                // 2. Subir Firma
+                val fileName = "firma_${folio}_${System.currentTimeMillis()}.jpg"
+                supabase.storage.from("firmas_prestamos").upload(fileName, firmaBytes)
+                val firmaUrl = supabase.storage.from("firmas_prestamos").publicUrl(fileName)
+
+                // 3. Crear registros de préstamo y actualizar equipos
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault())
+                val now = sdf.format(Date())
+
+                equiposSeleccionados.forEach { equipo ->
+                    // Insertar Préstamo
+                    val prestamo = Prestamo(
+                        idEquipo = equipo.id,
+                        folio = folio,
+                        nombreComodatario = nombre.uppercase(),
+                        fechaPrestamo = now,
+                        estado = "activo",
+                        firmaUrl = firmaUrl,
+                        modeloDispositivo = dispositivoModelo,
+                        nombreDispositivo = dispositivoNombre
+                    )
+                    supabase.from("prestamos").insert(prestamo)
+
+                    // Actualizar estado del equipo
+                    supabase.from("equipos").update(mapOf("estado" to "PRESTADO")) {
+                        filter { eq("id", equipo.id!!) }
+                    }
+                }
+
+                equiposSeleccionados.clear()
+                fetchEquipos()
+                onSuccess()
+            } catch (e: Exception) {
+                errorMessage = "Error al procesar préstamo: ${e.message}"
             } finally {
                 isLoading = false
             }
