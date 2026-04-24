@@ -527,7 +527,8 @@ fun FormularioResguardo(
                                 )
                             }
                         } else {
-                            Toast.makeText(context, "Falta nombre o firma", Toast.LENGTH_SHORT).show()
+                            val motivo = if (nombreComodatario.isBlank()) "nombre" else "firma"
+                            Toast.makeText(context, "Falta $motivo", Toast.LENGTH_SHORT).show()
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(60.dp),

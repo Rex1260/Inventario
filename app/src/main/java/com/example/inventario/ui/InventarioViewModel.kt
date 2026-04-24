@@ -1,6 +1,7 @@
 package com.example.inventario.ui
 
 import android.net.Uri
+import android.util.Log
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -164,20 +165,25 @@ class InventarioViewModel : ViewModel() {
         viewModelScope.launch {
             isLoading = true
             try {
+                Log.d("Prestamo", "Iniciando proceso para: $nombre")
+                
                 // 1. Obtener Folio
                 val folio = obtenerFolioParaUsuario(nombre)
+                Log.d("Prestamo", "Folio asignado: $folio")
                 
                 // 2. Subir Firma
                 val fileName = "firma_${folio}_${System.currentTimeMillis()}.jpg"
                 supabase.storage.from("firmas_prestamos").upload(fileName, firmaBytes)
                 val firmaUrl = supabase.storage.from("firmas_prestamos").publicUrl(fileName)
+                Log.d("Prestamo", "Firma subida: $firmaUrl")
 
                 // 3. Crear registros de préstamo y actualizar equipos
                 val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault())
                 val now = sdf.format(Date())
 
                 equiposSeleccionados.forEach { equipo ->
-                    // Insertar Préstamo
+                    Log.d("Prestamo", "Procesando equipo: ${equipo.noInventario}")
+                    
                     val prestamo = Prestamo(
                         idEquipo = equipo.id,
                         folio = folio,
@@ -190,7 +196,6 @@ class InventarioViewModel : ViewModel() {
                     )
                     supabase.from("prestamos").insert(prestamo)
 
-                    // Actualizar estado del equipo
                     supabase.from("equipos").update(mapOf("estado" to "PRESTADO")) {
                         filter { eq("id", equipo.id!!) }
                     }
@@ -200,6 +205,7 @@ class InventarioViewModel : ViewModel() {
                 fetchEquipos()
                 onSuccess()
             } catch (e: Exception) {
+                Log.e("Prestamo", "Error: ${e.message}", e)
                 errorMessage = "Error al procesar préstamo: ${e.message}"
             } finally {
                 isLoading = false
