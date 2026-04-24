@@ -2,6 +2,7 @@ package com.example.inventario.ui
 
 import android.net.Uri
 import android.util.Log
+import android.widget.Toast
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -18,6 +19,7 @@ import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.storage.storage
 import io.github.jan.supabase.functions.functions
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -54,6 +56,11 @@ class InventarioViewModel : ViewModel() {
     // Equipos disponibles para préstamo (FUNCIONAL y no eliminados)
     val equiposDisponiblesParaPrestamo by derivedStateOf {
         _equipos.filter { it.estado == "FUNCIONAL" && it.deletedAt == null }
+    }
+
+    // Equipos actualmente prestados
+    val equiposPrestados by derivedStateOf {
+        _equipos.filter { it.estado == "PRESTADO" && it.deletedAt == null }
     }
 
     fun toggleSeleccion(equipo: Equipo) {
@@ -416,6 +423,71 @@ class InventarioViewModel : ViewModel() {
                 onSuccess()
             } catch (e: Exception) {
                 errorMessage = "Error al eliminar: ${e.message}"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun registrarDevolucion(equipo: Equipo, prestamo: Prestamo?, context: android.content.Context, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault())
+                val now = sdf.format(Date())
+
+                // 1. Actualizar estado del equipo a FUNCIONAL
+                supabase.from("equipos").update(
+                    mapOf(
+                        "estado" to "FUNCIONAL",
+                        "fecha_modificacion" to now,
+                        "modificado_por_modelo" to android.os.Build.MODEL,
+                        "modificado_por_nombre" to (android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido")
+                    )
+                ) {
+                    filter { eq("id", equipo.id!!) }
+                }
+
+                // 2. Marcar el préstamo como devuelto
+                var folioFinalizado = ""
+                prestamo?.let { p ->
+                    supabase.from("prestamos").update(
+                        mapOf(
+                            "estado" to "devuelto",
+                            "fecha_devolucion" to now
+                        )
+                    ) {
+                        filter { eq("id", p.id!!) }
+                    }
+                    folioFinalizado = p.folio ?: ""
+                }
+
+                // 3. Verificar si quedan equipos pendientes en ese mismo FOLIO
+                val pendientes = if (folioFinalizado.isNotEmpty()) {
+                    supabase.from("prestamos").select {
+                        filter {
+                            eq("folio", folioFinalizado)
+                            eq("estado", "activo")
+                        }
+                    }.decodeList<Prestamo>()
+                } else emptyList()
+
+                fetchEquipos()
+                
+                // Mensaje personalizado según si se cerró el folio o no
+                val mensaje = if (pendientes.isEmpty()) {
+                    "Equipo recibido. ¡FOLIO $folioFinalizado CERRADO!"
+                } else {
+                    "Equipo recibido. Quedan ${pendientes.size} artículos en el folio $folioFinalizado"
+                }
+                
+                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    Toast.makeText(context, mensaje, Toast.LENGTH_LONG).show()
+                }
+
+                onSuccess()
+            } catch (e: Exception) {
+                errorMessage = "Error al registrar devolución: ${e.message}"
             } finally {
                 isLoading = false
             }
