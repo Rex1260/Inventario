@@ -120,19 +120,22 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun HomeScreen(onNavigateToInventario: () -> Unit, onNavigateToPrestamos: () -> Unit) {
     val context = LocalContext.current
+    var showExitDialog by remember { mutableStateOf(false) }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Menú Principal", fontWeight = FontWeight.Bold) },
                 actions = {
-                    IconButton(onClick = { (context as? Activity)?.finish() }) {
+                    IconButton(onClick = { showExitDialog = true }) {
                         Icon(Icons.Default.Close, contentDescription = "Cerrar Aplicación")
                     }
                 }
             )
         }
     ) { innerPadding ->
+        // ... (contenido del menú igual)
         Column(
             modifier = Modifier
                 .padding(innerPadding)
@@ -173,6 +176,24 @@ fun HomeScreen(onNavigateToInventario: () -> Unit, onNavigateToPrestamos: () -> 
                 }
             }
         }
+    }
+
+    if (showExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            title = { Text("Cerrar Aplicación") },
+            text = { Text("¿Estás seguro de que deseas salir del sistema?") },
+            confirmButton = {
+                Button(onClick = { (context as? Activity)?.finish() }) {
+                    Text("SÍ, SALIR")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExitDialog = false }) {
+                    Text("CANCELAR")
+                }
+            }
+        )
     }
 }
 
@@ -347,12 +368,12 @@ fun PrestamosScreen(viewModel: InventarioViewModel, onBack: () -> Unit) {
 
 @Composable
 fun PendientesView(viewModel: InventarioViewModel) {
-    // Agrupamos los equipos prestados por comodatario y folio
-    // Para esto necesitamos que el ViewModel cargue los detalles de los préstamos
-    // Por ahora, mostraremos la lista de lo que está fuera
-    val prestados = viewModel.equiposPrestados
+    // Agrupamos los préstamos por nombre del comodatario
+    val prestamosPorPersona = remember(viewModel.prestamosActivos.size) {
+        viewModel.prestamosActivos.groupBy { it.nombreComodatario ?: "SIN NOMBRE" }
+    }
 
-    if (prestados.isEmpty()) {
+    if (prestamosPorPersona.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("No hay préstamos activos en este momento", color = Color.Gray)
         }
@@ -360,30 +381,62 @@ fun PendientesView(viewModel: InventarioViewModel) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(prestados) { equipo ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text("No. Inventario: ${equipo.noInventario}", fontWeight = FontWeight.Bold)
-                            Text("${equipo.nombre} - ${equipo.marca}", style = MaterialTheme.typography.bodyMedium)
-                            Text("Estado: EN RESGUARDO", color = Color(0xFFE65100), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            prestamosPorPersona.forEach { (nombre, prestamos) ->
+                item {
+                    Text(
+                        text = nombre,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        prestamos.forEach { prestamo ->
+                            // Buscamos los datos del equipo en la lista de equipos del viewModel
+                            val equipo = viewModel.equiposPrestados.find { it.id == prestamo.idEquipo }
+                            
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Inventory, null, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text(
+                                            text = "Inv: ${equipo?.noInventario ?: "N/A"}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp
+                                        )
+                                        Text(
+                                            text = "${equipo?.nombre ?: "Equipo desconocido"} - Folio: ${prestamo.folio}",
+                                            fontSize = 12.sp
+                                        )
+                                        Text(
+                                            text = "En resguardo desde: ${prestamo.fechaPrestamo?.substringBefore("T")}",
+                                            fontSize = 11.sp,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
+                    HorizontalDivider(modifier = Modifier.padding(top = 16.dp))
                 }
             }
         }
     }
 }
+
 
 
 @OptIn(ExperimentalMaterial3Api::class)

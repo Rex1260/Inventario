@@ -21,6 +21,7 @@ import io.github.jan.supabase.functions.functions
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
@@ -35,6 +36,9 @@ class InventarioViewModel : ViewModel() {
     // Selección para préstamos
     val equiposSeleccionados = mutableStateListOf<Equipo>()
     
+    // Todos los préstamos activos para la vista de Pendientes
+    val prestamosActivos = mutableStateListOf<Prestamo>()
+
     // Nombres de personas con préstamos activos para sugerencias
     val nombresConPrestamosActivos = mutableStateListOf<String>()
 
@@ -105,13 +109,16 @@ class InventarioViewModel : ViewModel() {
                 }
 
                 // Cargar nombres con préstamos activos
-                val prestamosActivos = supabase.from("prestamos")
+                val pActivos = supabase.from("prestamos")
                     .select() {
                         filter { eq("estado", "activo") }
                     }.decodeList<Prestamo>()
                 
+                prestamosActivos.clear()
+                prestamosActivos.addAll(pActivos)
+                
                 nombresConPrestamosActivos.clear()
-                nombresConPrestamosActivos.addAll(prestamosActivos.mapNotNull { it.nombreComodatario }.distinct())
+                nombresConPrestamosActivos.addAll(pActivos.mapNotNull { it.nombreComodatario }.distinct())
                 
             } catch (e: Exception) {
                 errorMessage = "Error: ${e.message}"
@@ -211,19 +218,10 @@ class InventarioViewModel : ViewModel() {
 
                 // 4. Llamar a la Edge Function para enviar el correo
                 try {
-                    val listaEquipos = equiposSeleccionados.map {
-                        mapOf(
-                            "no_inventario" to it.noInventario,
-                            "nombre" to it.nombre,
-                            "marca" to it.marca,
-                            "modelo" to it.modelo
-                        )
-                    }
                     val payload = mapOf(
                         "folio" to folio,
                         "nombre" to nombre.uppercase(),
-                        "firma_url" to firmaUrl,
-                        "equipos" to listaEquipos
+                        "firma_url" to firmaUrl
                     )
                     supabase.functions.invoke("send-loan-contract", payload)
                     Log.d("Prestamo", "Edge Function llamada con éxito")
@@ -476,9 +474,21 @@ class InventarioViewModel : ViewModel() {
                 
                 // Mensaje personalizado según si se cerró el folio o no
                 val mensaje = if (pendientes.isEmpty()) {
-                    "Equipo recibido. ¡FOLIO $folioFinalizado CERRADO!"
+                    // Si el folio se cerró, calculamos la fecha de borrado de firma (hoy + 15 días)
+                    val calendar = Calendar.getInstance()
+                    calendar.add(Calendar.DAY_OF_YEAR, 15)
+                    val expiraAt = sdf.format(calendar.time)
+                    
+                    if (folioFinalizado.isNotEmpty()) {
+                        supabase.from("prestamos").update(mapOf("firma_expira_at" to expiraAt)) {
+                            filter { eq("folio", folioFinalizado) }
+                        }
+                    }
+                    
+                    "¡FOLIO $folioFinalizado CERRADO! Todos los equipos han sido devueltos."
                 } else {
-                    "Equipo recibido. Quedan ${pendientes.size} artículos en el folio $folioFinalizado"
+                    val cant = pendientes.size
+                    "Equipo recibido. Quedan $cant artículos en el folio $folioFinalizado"
                 }
                 
                 withContext(kotlinx.coroutines.Dispatchers.Main) {
