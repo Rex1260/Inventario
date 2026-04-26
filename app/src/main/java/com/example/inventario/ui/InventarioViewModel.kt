@@ -1,5 +1,7 @@
 package com.example.inventario.ui
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
 import android.widget.Toast
@@ -11,15 +13,19 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.inventario.data.supabase
+import com.example.inventario.model.Dano
 import com.example.inventario.model.Equipo
 import com.example.inventario.model.Prestamo
+import com.example.inventario.model.Usuario
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.storage.storage
 import io.github.jan.supabase.functions.functions
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -38,6 +44,13 @@ class InventarioViewModel : ViewModel() {
     
     // Todos los préstamos activos para la vista de Pendientes
     val prestamosActivos = mutableStateListOf<Prestamo>()
+    
+    // Historial de préstamos devueltos
+    val historialPrestamos = mutableStateListOf<Prestamo>()
+
+    // Usuarios oficiales de la tabla usuarios
+    val usuariosEncontrados = mutableStateListOf<Usuario>()
+    var usuarioSeleccionado by mutableStateOf<Usuario?>(null)
 
     // Nombres de personas con préstamos activos para sugerencias
     val nombresConPrestamosActivos = mutableStateListOf<String>()
@@ -120,6 +133,16 @@ class InventarioViewModel : ViewModel() {
                 nombresConPrestamosActivos.clear()
                 nombresConPrestamosActivos.addAll(pActivos.mapNotNull { it.nombreComodatario }.distinct())
                 
+                // Cargar Historial (últimos 100 préstamos devueltos)
+                val pHistorial = supabase.from("prestamos")
+                    .select() {
+                        filter { eq("estado", "devuelto") }
+                        order("fecha_devolucion", Order.DESCENDING)
+                        limit(100)
+                    }.decodeList<Prestamo>()
+                historialPrestamos.clear()
+                historialPrestamos.addAll(pHistorial)
+                
             } catch (e: Exception) {
                 errorMessage = "Error: ${e.message}"
                 e.printStackTrace()
@@ -129,12 +152,41 @@ class InventarioViewModel : ViewModel() {
         }
     }
 
-    suspend fun obtenerFolioParaUsuario(nombre: String): String {
+    fun buscarUsuarios(query: String) {
+        if (query.length < 2) {
+            usuariosEncontrados.clear()
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val results = supabase.from("usuarios")
+                    .select {
+                        filter {
+                            or {
+                                ilike("nombre", "%$query%")
+                                ilike("email", "%$query%")
+                            }
+                        }
+                        limit(5)
+                    }.decodeList<Usuario>()
+                usuariosEncontrados.clear()
+                usuariosEncontrados.addAll(results)
+            } catch (e: Exception) {
+                Log.e("Usuarios", "Error buscando: ${e.message}")
+            }
+        }
+    }
+
+    suspend fun obtenerFolioParaUsuario(nombre: String, idUsuario: String? = null): String {
         return try {
             val prestamoExistente = supabase.from("prestamos")
                 .select() {
                     filter {
-                        eq("nombre_comodatario", nombre.uppercase())
+                        if (idUsuario != null) {
+                            eq("id_usuario", idUsuario)
+                        } else {
+                            eq("nombre_comodatario", nombre.uppercase())
+                        }
                         eq("estado", "activo")
                     }
                     limit(1)
@@ -172,6 +224,7 @@ class InventarioViewModel : ViewModel() {
 
     fun realizarPrestamo(
         nombre: String,
+        idUsuario: String?,
         firmaBytes: ByteArray,
         dispositivoModelo: String,
         dispositivoNombre: String,
@@ -183,7 +236,7 @@ class InventarioViewModel : ViewModel() {
                 Log.d("Prestamo", "Iniciando proceso para: $nombre")
                 
                 // 1. Obtener Folio
-                val folio = obtenerFolioParaUsuario(nombre)
+                val folio = obtenerFolioParaUsuario(nombre, idUsuario)
                 Log.d("Prestamo", "Folio asignado: $folio")
                 
                 // 2. Subir Firma
@@ -201,6 +254,7 @@ class InventarioViewModel : ViewModel() {
                     
                     val prestamo = Prestamo(
                         idEquipo = equipo.id,
+                        idUsuario = idUsuario,
                         folio = folio,
                         nombreComodatario = nombre.uppercase(),
                         fechaPrestamo = now,
@@ -231,6 +285,7 @@ class InventarioViewModel : ViewModel() {
                 }
 
                 equiposSeleccionados.clear()
+                usuarioSeleccionado = null
                 fetchEquipos()
                 onSuccess()
             } catch (e: Exception) {
@@ -241,6 +296,7 @@ class InventarioViewModel : ViewModel() {
             }
         }
     }
+
 
     fun isNoInventarioDuplicado(noInventario: String, currentId: String?): Boolean {
         // Buscamos en la lista local (que ya tiene todos los registros cargados)
@@ -427,17 +483,24 @@ class InventarioViewModel : ViewModel() {
         }
     }
 
-    fun registrarDevolucion(equipo: Equipo, prestamo: Prestamo?, context: android.content.Context, onSuccess: () -> Unit) {
+    fun registrarDevolucion(
+        equipo: Equipo,
+        prestamo: Prestamo?,
+        context: android.content.Context,
+        dano: Dano? = null,
+        onSuccess: () -> Unit
+    ) {
         viewModelScope.launch {
             isLoading = true
             try {
                 val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault())
                 val now = sdf.format(Date())
 
-                // 1. Actualizar estado del equipo a FUNCIONAL
+                // 1. Actualizar estado del equipo
+                val nuevoEstado = if (dano != null) "EN MANTENIMIENTO" else "FUNCIONAL"
                 supabase.from("equipos").update(
                     mapOf(
-                        "estado" to "FUNCIONAL",
+                        "estado" to nuevoEstado,
                         "fecha_modificacion" to now,
                         "modificado_por_modelo" to android.os.Build.MODEL,
                         "modificado_por_nombre" to (android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido")
@@ -460,7 +523,33 @@ class InventarioViewModel : ViewModel() {
                     folioFinalizado = p.folio ?: ""
                 }
 
-                // 3. Verificar si quedan equipos pendientes en ese mismo FOLIO
+                // 3. Registrar daño si existe
+                dano?.let { d ->
+                    val danoConFecha = d.copy(
+                        idEquipo = equipo.id,
+                        folioPrestamo = folioFinalizado,
+                        fechaReporte = now
+                    )
+                    supabase.from("danos").insert(danoConFecha)
+                    
+                    // Si el daño es grave, enviar correo de alerta
+                    if (d.gravedad == "grave") {
+                        try {
+                            val payload = mapOf(
+                                "folio" to folioFinalizado,
+                                "equipo" to "${equipo.noInventario} - ${equipo.nombre}",
+                                "comodatario" to (prestamo?.nombreComodatario ?: "Desconocido"),
+                                "descripcion" to d.descripcion,
+                                "imagen_url" to d.imagenUrl
+                            )
+                            supabase.functions.invoke("notify-grave-damage", payload)
+                        } catch (e: Exception) {
+                            Log.e("Danos", "Error enviando alerta grave: ${e.message}")
+                        }
+                    }
+                }
+
+                // 4. Verificar si quedan equipos pendientes en ese mismo FOLIO
                 val pendientes = if (folioFinalizado.isNotEmpty()) {
                     supabase.from("prestamos").select {
                         filter {
@@ -485,7 +574,7 @@ class InventarioViewModel : ViewModel() {
                         }
                     }
                     
-                    "¡FOLIO $folioFinalizado CERRADO! Todos los equipos han sido devueltos."
+                    "¡FOLIO $folioFinalizado CERRADO! Equipos devueltos."
                 } else {
                     val cant = pendientes.size
                     "Equipo recibido. Quedan $cant artículos en el folio $folioFinalizado"
@@ -500,6 +589,24 @@ class InventarioViewModel : ViewModel() {
                 errorMessage = "Error al registrar devolución: ${e.message}"
             } finally {
                 isLoading = false
+            }
+        }
+    }
+
+    suspend fun subirImagenDano(context: android.content.Context, uri: Uri): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val bitmap = BitmapFactory.decodeStream(context.contentResolver.openInputStream(uri))
+                val bos = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 50, bos)
+                val bytes = bos.toByteArray()
+                
+                val fileName = "dano_${System.currentTimeMillis()}.jpg"
+                supabase.storage.from("fotos_danos").upload(fileName, bytes)
+                supabase.storage.from("fotos_danos").publicUrl(fileName)
+            } catch (e: Exception) {
+                Log.e("Upload", "Error: ${e.message}")
+                null
             }
         }
     }

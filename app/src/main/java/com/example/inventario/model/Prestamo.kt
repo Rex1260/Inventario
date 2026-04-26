@@ -7,6 +7,8 @@ import kotlinx.serialization.Serializable
 data class Prestamo(
     @SerialName("id")
     val id: String? = null,
+    @SerialName("id_usuario")
+    val idUsuario: String? = null,
     @SerialName("id_equipo")
     val idEquipo: String? = null,
     @SerialName("folio")
