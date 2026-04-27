@@ -1,8 +1,10 @@
 package com.example.inventario.ui
 
+import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Base64
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.derivedStateOf
@@ -10,7 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.inventario.data.supabase
 import com.example.inventario.model.Dano
@@ -22,17 +24,30 @@ import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.storage.storage
 import io.github.jan.supabase.functions.functions
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.providers.builtin.Email
+import com.example.inventario.model.Perfil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
+import com.example.inventario.util.ContratoGenerator
+import android.content.Intent
+import androidx.core.content.FileProvider
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-class InventarioViewModel : ViewModel() {
+class InventarioViewModel(application: Application) : AndroidViewModel(application) {
+    var sessionInitialized by mutableStateOf(false)
+    var currentUserPerfil by mutableStateOf<Perfil?>(null)
+    
+    fun isAdmin() = currentUserPerfil?.rol == "ADMIN"
+    fun isViewer() = currentUserPerfil?.rol == "VIEWER"
+    fun isLogged() = currentUserPerfil != null
+
     private val _equipos = mutableStateListOf<Equipo>()
     var isLoading by mutableStateOf(false)
     var errorMessage by mutableStateOf<String?>(null)
@@ -48,6 +63,9 @@ class InventarioViewModel : ViewModel() {
     // Historial de préstamos devueltos
     val historialPrestamos = mutableStateListOf<Prestamo>()
 
+    // Lista de daños para el equipo seleccionado
+    val danosDelEquipo = mutableStateListOf<Dano>()
+
     // Usuarios oficiales de la tabla usuarios
     val usuariosEncontrados = mutableStateListOf<Usuario>()
     var usuarioSeleccionado by mutableStateOf<Usuario?>(null)
@@ -62,10 +80,13 @@ class InventarioViewModel : ViewModel() {
 
     val filteredEquipos by derivedStateOf {
         if (searchQuery.isBlank()) {
-            if (_equipos.isNotEmpty()) listOf(_equipos.first()) else emptyList()
+            _equipos
         } else {
             _equipos.filter { equipo ->
-                equipo.noInventario?.contains(searchQuery, ignoreCase = true) == true
+                equipo.noInventario?.contains(searchQuery, ignoreCase = true) == true ||
+                equipo.marca?.contains(searchQuery, ignoreCase = true) == true ||
+                equipo.numeroSerie?.contains(searchQuery, ignoreCase = true) == true ||
+                equipo.nombre?.contains(searchQuery, ignoreCase = true) == true
             }
         }
     }
@@ -78,6 +99,19 @@ class InventarioViewModel : ViewModel() {
     // Equipos actualmente prestados
     val equiposPrestados by derivedStateOf {
         _equipos.filter { it.estado == "PRESTADO" && it.deletedAt == null }
+    }
+
+    // Estadísticas para el Dashboard
+    val statsTotalEquipos by derivedStateOf { _equipos.count { it.deletedAt == null } }
+    val statsPrestados by derivedStateOf { _equipos.count { it.estado == "PRESTADO" && it.deletedAt == null } }
+    val statsMantenimiento by derivedStateOf { _equipos.count { it.estado == "EN MANTENIMIENTO" && it.deletedAt == null } }
+    val statsDisponibles by derivedStateOf { _equipos.count { it.estado == "FUNCIONAL" && it.deletedAt == null } }
+    
+    val statsVencidos by derivedStateOf {
+        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault()).format(Date())
+        prestamosActivos.count { 
+            !it.fechaVencimiento.isNullOrEmpty() && it.fechaVencimiento!! < now 
+        }
     }
 
     fun toggleSeleccion(equipo: Equipo) {
@@ -105,7 +139,7 @@ class InventarioViewModel : ViewModel() {
                                 filter("deleted_at", FilterOperator.IS, null)
                             }
                         }
-                        order("fecha_registro", Order.DESCENDING)
+                        order("no_inventario", Order.ASCENDING)
                     }
                     .decodeList<Equipo>()
                 _equipos.clear()
@@ -114,11 +148,11 @@ class InventarioViewModel : ViewModel() {
                 // Actualizar sugerencias solo con equipos activos para que no salgan cosas borradas
                 if (!isTrashMode) {
                     categoriasExistentes.clear()
-                    categoriasExistentes.addAll(results.mapNotNull { it.categoria }.distinct())
+                    categoriasExistentes.addAll(results.mapNotNull { it.categoria }.distinct().filter { it.isNotBlank() }.sorted())
                     marcasExistentes.clear()
-                    marcasExistentes.addAll(results.mapNotNull { it.marca }.distinct())
+                    marcasExistentes.addAll(results.mapNotNull { it.marca }.distinct().filter { it.isNotBlank() }.sorted())
                     modelosExistentes.clear()
-                    modelosExistentes.addAll(results.mapNotNull { it.modelo }.distinct())
+                    modelosExistentes.addAll(results.mapNotNull { it.modelo }.distinct().filter { it.isNotBlank() }.sorted())
                 }
 
                 // Cargar nombres con préstamos activos
@@ -146,6 +180,25 @@ class InventarioViewModel : ViewModel() {
             } catch (e: Exception) {
                 errorMessage = "Error: ${e.message}"
                 e.printStackTrace()
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun fetchDanosEquipo(idEquipo: String) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                val results = supabase.from("danos")
+                    .select {
+                        filter { eq("id_equipo", idEquipo) }
+                        order("fecha_reporte", Order.DESCENDING)
+                    }.decodeList<Dano>()
+                danosDelEquipo.clear()
+                danosDelEquipo.addAll(results)
+            } catch (e: Exception) {
+                Log.e("Danos", "Error al cargar daños: ${e.message}")
             } finally {
                 isLoading = false
             }
@@ -228,6 +281,7 @@ class InventarioViewModel : ViewModel() {
         firmaBytes: ByteArray,
         dispositivoModelo: String,
         dispositivoNombre: String,
+        fechaVencimiento: String? = null,
         onSuccess: () -> Unit
     ) {
         viewModelScope.launch {
@@ -258,6 +312,7 @@ class InventarioViewModel : ViewModel() {
                         folio = folio,
                         nombreComodatario = nombre.uppercase(),
                         fechaPrestamo = now,
+                        fechaVencimiento = fechaVencimiento,
                         estado = "activo",
                         firmaUrl = firmaUrl,
                         modeloDispositivo = dispositivoModelo,
@@ -270,18 +325,29 @@ class InventarioViewModel : ViewModel() {
                     }
                 }
 
-                // 4. Llamar a la Edge Function para enviar el correo
+                // 4. Generar PDF para el correo
+                val pdfFile = withContext(Dispatchers.IO) {
+                    val bitmapFirma = BitmapFactory.decodeByteArray(firmaBytes, 0, firmaBytes.size)
+                    ContratoGenerator.generarContratoPDF(getApplication(), 
+                        Prestamo(folio = folio, nombreComodatario = nombre), 
+                        equiposSeleccionados.toList(), 
+                        bitmapFirma)
+                }
+                
+                val pdfBase64 = pdfFile?.readBytes()?.let { Base64.encodeToString(it, Base64.NO_WRAP) }
+
+                // 5. Llamar a la Edge Function para enviar el correo con el PDF adjunto
                 try {
                     val payload = mapOf(
                         "folio" to folio,
                         "nombre" to nombre.uppercase(),
-                        "firma_url" to firmaUrl
+                        "firma_url" to firmaUrl,
+                        "pdf_base64" to pdfBase64
                     )
                     supabase.functions.invoke("send-loan-contract", payload)
-                    Log.d("Prestamo", "Edge Function llamada con éxito")
+                    Log.d("Prestamo", "Edge Function llamada con éxito (PDF incluido)")
                 } catch (e: Exception) {
                     Log.e("Prestamo", "Error al llamar Edge Function: ${e.message}")
-                    // No bloqueamos el éxito del préstamo si solo falla el correo
                 }
 
                 equiposSeleccionados.clear()
@@ -299,8 +365,6 @@ class InventarioViewModel : ViewModel() {
 
 
     fun isNoInventarioDuplicado(noInventario: String, currentId: String?): Boolean {
-        // Buscamos en la lista local (que ya tiene todos los registros cargados)
-        // si existe otro equipo con ese número que no sea el mismo que estamos editando
         return _equipos.any { it.noInventario == noInventario && it.id != currentId }
     }
 
@@ -317,7 +381,7 @@ class InventarioViewModel : ViewModel() {
                     mapOf(
                         "deleted_at" to null,
                         "modificado_por_modelo" to android.os.Build.MODEL,
-                        "modificado_por_nombre" to (android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido")
+                        "modificado_por_nombre" to (currentUserPerfil?.nombre ?: "Admin")
                     )
                 ) {
                     filter { eq("id", equipo.id!!) }
@@ -361,20 +425,45 @@ class InventarioViewModel : ViewModel() {
         return prefijo.uppercase() + (maxNumero + 1).toString().padStart(5, '0')
     }
 
+    private suspend fun subirImagen(uri: Uri): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val inputStream = getApplication<Application>().contentResolver.openInputStream(uri)
+                val bitmap = BitmapFactory.decodeStream(inputStream)
+                val bos = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 70, bos)
+                val bytes = bos.toByteArray()
+                
+                val fileName = "equipo_${System.currentTimeMillis()}.jpg"
+                supabase.storage.from("fotos_equipos").upload(fileName, bytes)
+                supabase.storage.from("fotos_equipos").publicUrl(fileName)
+            } catch (e: Exception) {
+                Log.e("Upload", "Error: ${e.message}")
+                null
+            }
+        }
+    }
+
     fun guardarEquipo(
         equipo: Equipo,
-        imageUri: Uri?,
+        nuevaImagenUri: Uri?,
         onSuccess: () -> Unit
     ) {
         viewModelScope.launch {
             isLoading = true
             try {
-                // 2. Insertar en DB
+                var finalImagenUrl = equipo.imagenUrl
+
+                if (nuevaImagenUri != null) {
+                    finalImagenUrl = subirImagen(nuevaImagenUri)
+                }
+                
                 val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault())
                 val now = sdf.format(Date())
                 val equipoConFechas = equipo.copy(
                     fechaRegistro = now,
-                    fechaModificacion = now
+                    fechaModificacion = now,
+                    imagenUrl = finalImagenUrl
                 )
                 
                 supabase.from("equipos").insert(equipoConFechas)
@@ -397,21 +486,26 @@ class InventarioViewModel : ViewModel() {
         viewModelScope.launch {
             isLoading = true
             try {
-                // 1. Si hay una imagen anterior y se subió una nueva, borramos la vieja del Storage
-                if (!oldImagenUrl.isNullOrEmpty() && nuevaImagenUri != null) {
-                    try {
-                        val fileName = oldImagenUrl.substringAfterLast("/")
-                        supabase.storage.from("fotos_equipos").delete(fileName)
-                    } catch (e: Exception) {
-                        // Continuamos aunque falle el borrado de la imagen vieja
+                var finalImagenUrl = equipo.imagenUrl
+
+                if (nuevaImagenUri != null) {
+                    // Subir la nueva
+                    finalImagenUrl = subirImagen(nuevaImagenUri)
+                    
+                    // Borrar la vieja si existía
+                    if (!oldImagenUrl.isNullOrEmpty()) {
+                        try {
+                            val fileName = oldImagenUrl.substringAfterLast("/")
+                            supabase.storage.from("fotos_equipos").delete(fileName)
+                        } catch (e: Exception) {
+                            Log.e("Storage", "No se pudo borrar imagen vieja: ${e.message}")
+                        }
                     }
                 }
 
-                // 2. Actualizar en DB
                 val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault())
                 val now = sdf.format(Date())
                 
-                // Preparamos los datos a actualizar (excluimos campos que no cambian como fecha_registro o id)
                 val updates = mapOf(
                     "no_inventario" to equipo.noInventario,
                     "nombre" to equipo.nombre,
@@ -422,10 +516,10 @@ class InventarioViewModel : ViewModel() {
                     "estado" to equipo.estado,
                     "numero_serie" to equipo.numeroSerie,
                     "numerotag" to equipo.numerotag,
-                    "imagen_url" to equipo.imagenUrl,
+                    "imagen_url" to finalImagenUrl,
                     "fecha_modificacion" to now,
-                    "modificado_por_modelo" to equipo.modificadoPorModelo,
-                    "modificado_por_nombre" to equipo.modificadoPorNombre
+                    "modificado_por_modelo" to android.os.Build.MODEL,
+                    "modificado_por_nombre" to (currentUserPerfil?.nombre ?: "Admin")
                 )
 
                 supabase.from("equipos").update(updates) {
@@ -446,17 +540,15 @@ class InventarioViewModel : ViewModel() {
         viewModelScope.launch {
             isLoading = true
             try {
-                // 1. Si tiene imagen, la borramos físicamente de Storage
+                // Actualización lógica en DB (mantener la imagen por si se restaura, o borrarla si decides)
+                // Para Die Cut, solemos borrar la imagen para ahorrar espacio en borrado lógico
                 if (!equipo.imagenUrl.isNullOrEmpty()) {
                     try {
                         val fileName = equipo.imagenUrl.substringAfterLast("/")
                         supabase.storage.from("fotos_equipos").delete(fileName)
-                    } catch (e: Exception) {
-                        // Si falla el borrado de imagen, continuamos con el registro
-                    }
+                    } catch (e: Exception) {}
                 }
 
-                // 2. Actualización lógica en DB
                 val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault())
                 val now = sdf.format(Date())
                 
@@ -465,12 +557,10 @@ class InventarioViewModel : ViewModel() {
                         "deleted_at" to now,
                         "imagen_url" to null,
                         "modificado_por_modelo" to android.os.Build.MODEL,
-                        "modificado_por_nombre" to (android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido")
+                        "modificado_por_nombre" to (currentUserPerfil?.nombre ?: "Admin")
                     )
                 ) {
-                    filter {
-                        eq("id", equipo.id!!)
-                    }
+                    filter { eq("id", equipo.id!!) }
                 }
 
                 fetchEquipos()
@@ -503,7 +593,7 @@ class InventarioViewModel : ViewModel() {
                         "estado" to nuevoEstado,
                         "fecha_modificacion" to now,
                         "modificado_por_modelo" to android.os.Build.MODEL,
-                        "modificado_por_nombre" to (android.provider.Settings.Global.getString(context.contentResolver, "device_name") ?: "Desconocido")
+                        "modificado_por_nombre" to (currentUserPerfil?.nombre ?: "Admin")
                     )
                 ) {
                     filter { eq("id", equipo.id!!) }
@@ -532,7 +622,6 @@ class InventarioViewModel : ViewModel() {
                     )
                     supabase.from("danos").insert(danoConFecha)
                     
-                    // Si el daño es grave, enviar correo de alerta
                     if (d.gravedad == "grave") {
                         try {
                             val payload = mapOf(
@@ -549,41 +638,35 @@ class InventarioViewModel : ViewModel() {
                     }
                 }
 
-                // 4. Verificar si quedan equipos pendientes en ese mismo FOLIO
-                val pendientes = if (folioFinalizado.isNotEmpty()) {
-                    supabase.from("prestamos").select {
+                // 4. Verificar cierre de folio
+                if (folioFinalizado.isNotEmpty()) {
+                    val activos = supabase.from("prestamos").select {
                         filter {
                             eq("folio", folioFinalizado)
                             eq("estado", "activo")
                         }
                     }.decodeList<Prestamo>()
-                } else emptyList()
 
-                fetchEquipos()
-                
-                // Mensaje personalizado según si se cerró el folio o no
-                val mensaje = if (pendientes.isEmpty()) {
-                    // Si el folio se cerró, calculamos la fecha de borrado de firma (hoy + 15 días)
-                    val calendar = Calendar.getInstance()
-                    calendar.add(Calendar.DAY_OF_YEAR, 15)
-                    val expiraAt = sdf.format(calendar.time)
-                    
-                    if (folioFinalizado.isNotEmpty()) {
+                    if (activos.isEmpty()) {
+                        val calendar = Calendar.getInstance()
+                        calendar.add(Calendar.DAY_OF_YEAR, 15)
+                        val expiraAt = sdf.format(calendar.time)
+                        
                         supabase.from("prestamos").update(mapOf("firma_expira_at" to expiraAt)) {
                             filter { eq("folio", folioFinalizado) }
                         }
+                        
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "¡FOLIO $folioFinalizado CERRADO!", Toast.LENGTH_LONG).show()
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Recibido. Faltan ${activos.size} equipos en este folio.", Toast.LENGTH_SHORT).show()
+                        }
                     }
-                    
-                    "¡FOLIO $folioFinalizado CERRADO! Equipos devueltos."
-                } else {
-                    val cant = pendientes.size
-                    "Equipo recibido. Quedan $cant artículos en el folio $folioFinalizado"
-                }
-                
-                withContext(kotlinx.coroutines.Dispatchers.Main) {
-                    Toast.makeText(context, mensaje, Toast.LENGTH_LONG).show()
                 }
 
+                fetchEquipos()
                 onSuccess()
             } catch (e: Exception) {
                 errorMessage = "Error al registrar devolución: ${e.message}"
@@ -596,7 +679,8 @@ class InventarioViewModel : ViewModel() {
     suspend fun subirImagenDano(context: android.content.Context, uri: Uri): String? {
         return withContext(Dispatchers.IO) {
             try {
-                val bitmap = BitmapFactory.decodeStream(context.contentResolver.openInputStream(uri))
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val bitmap = BitmapFactory.decodeStream(inputStream)
                 val bos = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 50, bos)
                 val bytes = bos.toByteArray()
@@ -607,6 +691,185 @@ class InventarioViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e("Upload", "Error: ${e.message}")
                 null
+            }
+        }
+    }
+
+    // --- AUTENTICACIÓN ---
+
+    // Gestión de Usuarios (Admin)
+    val todosLosPerfiles = mutableStateListOf<Perfil>()
+
+    fun fetchTodosLosPerfiles() {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                val results = supabase.from("perfiles").select().decodeList<Perfil>()
+                todosLosPerfiles.clear()
+                todosLosPerfiles.addAll(results.sortedBy { it.nombre })
+            } catch (e: Exception) {
+                Log.e("Admin", "Error cargando perfiles: ${e.message}")
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun actualizarRolUsuario(idUsuario: String, nuevoRol: String) {
+        viewModelScope.launch {
+            try {
+                supabase.from("perfiles").update(mapOf("rol" to nuevoRol)) {
+                    filter { eq("id", idUsuario) }
+                }
+                // Si el usuario actualizado es el actual, refrescamos su estado local
+                if (idUsuario == currentUserPerfil?.id) {
+                    currentUserPerfil = currentUserPerfil?.copy(rol = nuevoRol)
+                }
+                fetchTodosLosPerfiles()
+            } catch (e: Exception) {
+                Log.e("Admin", "Error actualizando rol: ${e.message}")
+            }
+        }
+    }
+
+    fun eliminarUsuario(idUsuario: String) {
+        viewModelScope.launch {
+            try {
+                // Esto borra el perfil, pero el usuario seguiría existiendo en Auth. 
+                // Por ahora borramos el perfil para quitarle acceso.
+                supabase.from("perfiles").delete {
+                    filter { eq("id", idUsuario) }
+                }
+                fetchTodosLosPerfiles()
+            } catch (e: Exception) {
+                Log.e("Admin", "Error eliminando perfil: ${e.message}")
+            }
+        }
+    }
+
+    fun registrarse(email: String, pass: String, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            isLoading = true
+            errorMessage = null
+            Log.d("Auth", "Intentando registrar: $email")
+            try {
+                val response = supabase.auth.signUpWith(Email) {
+                    this.email = email
+                    this.password = pass
+                }
+                Log.d("Auth", "Registro exitoso: $response")
+                onSuccess()
+            } catch (e: Exception) {
+                errorMessage = "Error al registrar: ${e.message}"
+                Log.e("Auth", "Error fatal en registro: ${e.message}", e)
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun descargarContratoYCompartir(context: android.content.Context, prestamo: Prestamo) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                // 1. Obtener equipos del folio
+                val equipos = supabase.from("equipos").select {
+                    filter { eq("id", prestamo.idEquipo!!) }
+                }.decodeList<Equipo>()
+
+                // 2. Descargar firma
+                val firmaUrl = prestamo.firmaUrl
+                var firmaBitmap: Bitmap? = null
+                if (!firmaUrl.isNullOrEmpty()) {
+                    val bytes = withContext(Dispatchers.IO) {
+                        val url = java.net.URL(firmaUrl)
+                        val connection = url.openConnection()
+                        connection.doInput = true
+                        connection.connect()
+                        val input = connection.getInputStream()
+                        BitmapFactory.decodeStream(input)
+                    }
+                    firmaBitmap = bytes
+                }
+
+                // 3. Generar PDF
+                val file = ContratoGenerator.generarContratoPDF(context, prestamo, equipos, firmaBitmap)
+                
+                if (file != null) {
+                    val uri = FileProvider.getUriForFile(context, "com.example.inventario.fileprovider", file)
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/pdf"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Compartir Contrato"))
+                }
+            } catch (e: Exception) {
+                Log.e("PDF", "Error: ${e.message}")
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun iniciarSesion(email: String, pass: String, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            isLoading = true
+            errorMessage = null
+            val cleanEmail = email.trim().lowercase()
+            val cleanPass = pass.trim()
+            try {
+                supabase.auth.signInWith(Email) {
+                    this.email = cleanEmail
+                    this.password = cleanPass
+                }
+                
+                // Esperar un momento para que la sesión se asiente
+                val user = supabase.auth.currentUserOrNull()
+                if (user != null) {
+                    val perfil = supabase.from("perfiles").select {
+                        filter { eq("id", user.id) }
+                    }.decodeSingleOrNull<Perfil>()
+                    
+                    currentUserPerfil = perfil ?: Perfil(id = user.id, nombre = email.substringBefore("@"), rol = "USER")
+                    onSuccess()
+                }
+            } catch (e: Exception) {
+                errorMessage = "Error de acceso: ${e.message}"
+                Log.e("Auth", "Error: ${e.message}")
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun cerrarSesion(onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                supabase.auth.signOut()
+                currentUserPerfil = null
+                onSuccess()
+            } catch (e: Exception) {
+                Log.e("Auth", "Error al salir: ${e.message}")
+            }
+        }
+    }
+
+    fun verificarSesion() {
+        viewModelScope.launch {
+            try {
+                val user = supabase.auth.currentUserOrNull()
+                if (user != null) {
+                    val perfil = supabase.from("perfiles").select {
+                        filter { eq("id", user.id) }
+                    }.decodeSingleOrNull<Perfil>()
+                    
+                    currentUserPerfil = perfil ?: Perfil(id = user.id, nombre = user.email?.substringBefore("@"), rol = "USER")
+                }
+            } catch (e: Exception) {
+                Log.e("Auth", "Sesión no encontrada")
+            } finally {
+                sessionInitialized = true
             }
         }
     }

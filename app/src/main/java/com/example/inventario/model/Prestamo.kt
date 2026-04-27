@@ -19,6 +19,8 @@ data class Prestamo(
     val fechaPrestamo: String? = null,
     @SerialName("fecha_devolucion")
     val fechaDevolucion: String? = null,
+    @SerialName("fecha_vencimiento")
+    val fechaVencimiento: String? = null,
     @SerialName("estado")
     val estado: String? = "activo",
     @SerialName("firma_url")
