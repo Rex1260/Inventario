@@ -564,166 +564,151 @@ fun SalidaEquiposView(viewModel: InventarioViewModel) {
 fun RetornoEquiposView(viewModel: InventarioViewModel) {
     var searchQuery by remember { mutableStateOf("") }
     var showOCR by remember { mutableStateOf(false) }
-    var equipoSeleccionado by remember { mutableStateOf<Equipo?>(null) }
-    var showReturnChoiceDialog by remember { mutableStateOf(false) }
+    
+    // Lista de préstamos encontrados para devolver
+    var prestamosEncontrados = remember { mutableStateListOf<Prestamo>() }
+    var equipoParaDano by remember { mutableStateOf<Pair<Equipo, Prestamo?>?>(null) }
+    var showReturnChoiceDialog by remember { mutableStateOf<Prestamo?>(null) }
     var showDamageForm by remember { mutableStateOf(false) }
+    var showBulkReturnDialog by remember { mutableStateOf(false) }
     
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     
-    val coincidencias by remember(searchQuery, viewModel.equiposPrestados) {
-        derivedStateOf {
-            if (searchQuery.length >= 1) {
-                viewModel.equiposPrestados.filter { it.noInventario?.contains(searchQuery, ignoreCase = true) == true }
-            } else emptyList()
-        }
-    }
-
-    var prestamoInfo by remember { mutableStateOf<Prestamo?>(null) }
-
-    LaunchedEffect(equipoSeleccionado) {
-        equipoSeleccionado?.let { equipo ->
+    // Función de búsqueda unificada
+    fun buscar() {
+        val term = searchQuery.trim().uppercase()
+        if (term.isEmpty()) return
+        
+        coroutineScope.launch {
+            viewModel.isLoading = true
             try {
-                val result = supabase.from("prestamos").select() {
-                    filter {
-                        eq("id_equipo", equipo.id!!)
-                        eq("estado", "activo")
+                if (term.startsWith("PR-")) {
+                    // Buscar por Folio
+                    val results = supabase.from("prestamos").select {
+                        filter { eq("folio", term); eq("estado", "activo") }
+                    }.decodeList<Prestamo>()
+                    
+                    prestamosEncontrados.clear()
+                    prestamosEncontrados.addAll(results)
+                    if (results.isEmpty()) {
+                        Toast.makeText(context, "No se encontraron préstamos activos para este folio", Toast.LENGTH_SHORT).show()
                     }
-                    order("fecha_prestamo", io.github.jan.supabase.postgrest.query.Order.DESCENDING)
-                    limit(1)
-                }.decodeSingleOrNull<Prestamo>()
-                prestamoInfo = result
+                } else {
+                    // Buscar por No Inventario
+                    val equipo = viewModel.equiposPrestados.find { it.noInventario == term }
+                    if (equipo != null) {
+                        val result = supabase.from("prestamos").select {
+                            filter { eq("id_equipo", equipo.id!!); eq("estado", "activo") }
+                            order("fecha_prestamo", io.github.jan.supabase.postgrest.query.Order.DESCENDING)
+                            limit(1)
+                        }.decodeSingleOrNull<Prestamo>()
+                        
+                        prestamosEncontrados.clear()
+                        if (result != null) {
+                            prestamosEncontrados.add(result)
+                        } else {
+                            // Está marcado como prestado pero no tiene folio activo (caso raro)
+                            prestamosEncontrados.add(Prestamo(idEquipo = equipo.id, nombreComodatario = "DESCONOCIDO", folio = "S/N"))
+                        }
+                    } else {
+                        Toast.makeText(context, "Equipo no encontrado o no está prestado", Toast.LENGTH_SHORT).show()
+                    }
+                }
             } catch (e: Exception) {
-                prestamoInfo = null
+                Toast.makeText(context, "Error al buscar: ${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                viewModel.isLoading = false
             }
-        } ?: run {
-            prestamoInfo = null
         }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { 
-                searchQuery = it.uppercase()
-                if (it.isEmpty()) equipoSeleccionado = null
-            },
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            placeholder = { Text("Escanear o escribir No. Inv...") },
-            leadingIcon = {
-                IconButton(onClick = { showOCR = true }) {
-                    Icon(Icons.Default.QrCodeScanner, null, tint = MaterialTheme.colorScheme.primary)
-                }
-            },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { 
-                        searchQuery = ""
-                        equipoSeleccionado = null
-                    }) {
-                        Icon(Icons.Default.Clear, null)
+        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it.uppercase() },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("No. Inv o Folio (PR-...)") },
+                leadingIcon = {
+                    IconButton(onClick = { showOCR = true }) {
+                        Icon(Icons.Default.QrCodeScanner, null, tint = MaterialTheme.colorScheme.primary)
                     }
-                }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp)
-        )
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { 
+                            searchQuery = ""
+                            prestamosEncontrados.clear()
+                        }) { Icon(Icons.Default.Clear, null) }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = { buscar() },
+                modifier = Modifier.height(56.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.Search, null)
+            }
+        }
 
         Box(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            if (equipoSeleccionado != null) {
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
-                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 8.dp)
-                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Text("EQUIPO SELECCIONADO", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                        
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (!equipoSeleccionado!!.imagenUrl.isNullOrEmpty()) {
-                                AsyncImage(
-                                    model = equipoSeleccionado!!.imagenUrl,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(80.dp).clip(RoundedCornerShape(8.dp)),
-                                    contentScale = ContentScale.Crop
-                                )
-                                Spacer(modifier = Modifier.width(16.dp))
+            if (prestamosEncontrados.isNotEmpty()) {
+                Column {
+                    // Cabecera del Folio
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
+                    ) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("RESPONSABLE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                                Text(prestamosEncontrados[0].nombreComodatario ?: "DESCONOCIDO", fontWeight = FontWeight.Black, fontSize = 18.sp)
+                                Text("Folio: ${prestamosEncontrados[0].folio}", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                             }
-                            Column {
-                                Text("No. Inv: ${equipoSeleccionado!!.noInventario}", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                Text("Nombre: ${equipoSeleccionado!!.nombre}", color = Color.Gray)
-                            }
-                        }
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        if (prestamoInfo != null) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text("INFORMACIÓN DEL PRÉSTAMO", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    Text("Folio: ${prestamoInfo!!.folio}", fontWeight = FontWeight.Bold)
-                                    Text("Comodatario: ${prestamoInfo!!.nombreComodatario}")
-                                    Text("Fecha: ${prestamoInfo!!.fechaPrestamo?.substringBefore("T")}")
+                            if (prestamosEncontrados.size > 1) {
+                                Button(
+                                    onClick = { showBulkReturnDialog = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                                ) {
+                                    Text("TODO (${prestamosEncontrados.size})")
                                 }
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(24.dp))
-                        
-                        if (!viewModel.isViewer()) {
-                            Button(
-                                onClick = { showReturnChoiceDialog = true },
-                                modifier = Modifier.fillMaxWidth().height(56.dp),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.CheckCircle, null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("PROCESAR DEVOLUCIÓN")
-                            }
-                        } else {
-                            Surface(
-                                color = Color.Yellow.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    "Modo Lectura: No puedes procesar devoluciones",
-                                    modifier = Modifier.padding(12.dp),
-                                    fontSize = 12.sp,
-                                    color = Color.DarkGray,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                            }
-                        }
-                        
-                        TextButton(
-                            onClick = { equipoSeleccionado = null },
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        ) {
-                            Text("CANCELAR", color = Color.Gray)
-                        }
                     }
-                }
-            } else if (coincidencias.isNotEmpty()) {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(coincidencias) { equipo ->
-                        OutlinedCard(
-                            onClick = { 
-                                equipoSeleccionado = equipo
-                                searchQuery = equipo.noInventario ?: ""
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Inventory, null, tint = Color.Gray)
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(equipo.noInventario ?: "", fontWeight = FontWeight.Bold)
-                                    Text(equipo.nombre ?: "", fontSize = 12.sp)
+
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 80.dp)) {
+                        items(prestamosEncontrados) { prestamo ->
+                            val equipo = viewModel.equiposPrestados.find { it.id == prestamo.idEquipo } ?: Equipo(nombre = "Equipo no encontrado", noInventario = "???")
+                            
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                            ) {
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(modifier = Modifier.size(50.dp).clip(RoundedCornerShape(8.dp)).background(Color.Gray.copy(alpha = 0.1f))) {
+                                        if (!equipo.imagenUrl.isNullOrEmpty()) {
+                                            AsyncImage(model = equipo.imagenUrl, contentDescription = null, contentScale = ContentScale.Crop)
+                                        } else {
+                                            Icon(Icons.Default.Devices, null, modifier = Modifier.align(Alignment.Center), tint = Color.LightGray)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(equipo.noInventario ?: "S/N", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        Text(equipo.nombre ?: "Sin nombre", fontSize = 14.sp, maxLines = 1)
+                                    }
+                                    Button(
+                                        onClick = { showReturnChoiceDialog = prestamo },
+                                        contentPadding = PaddingValues(horizontal = 12.dp),
+                                        modifier = Modifier.height(36.dp)
+                                    ) {
+                                        Text("RECIBIR", fontSize = 12.sp)
+                                    }
                                 }
                             }
                         }
@@ -734,59 +719,93 @@ fun RetornoEquiposView(viewModel: InventarioViewModel) {
                     modifier = Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(Icons.Default.Search, null, modifier = Modifier.size(80.dp), tint = Color.LightGray)
+                    Icon(Icons.Default.Inbox, null, modifier = Modifier.size(80.dp), tint = Color.LightGray)
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("Ingresa o escanea un No. de Inventario", color = Color.Gray)
+                    Text("Ingresa No. de Inventario o Folio", color = Color.Gray)
                 }
             }
         }
     }
 
-    if (showReturnChoiceDialog && equipoSeleccionado != null) {
+    // Diálogo de Condición (Individual)
+    if (showReturnChoiceDialog != null) {
+        val p = showReturnChoiceDialog!!
+        val eq = viewModel.equiposPrestados.find { it.id == p.idEquipo }!!
+        
         AlertDialog(
-            onDismissRequest = { showReturnChoiceDialog = false },
+            onDismissRequest = { showReturnChoiceDialog = null },
             title = { Text("Condición de Entrega") },
-            text = { Text("¿En qué condiciones se recibe el equipo?") },
+            text = { Text("¿En qué condiciones se recibe el equipo ${eq.noInventario}?") },
             confirmButton = {
                 Button(
                     onClick = { 
-                        showReturnChoiceDialog = false
                         coroutineScope.launch {
-                            viewModel.registrarDevolucion(equipoSeleccionado!!, prestamoInfo, context) {
-                                searchQuery = ""
-                                equipoSeleccionado = null
+                            viewModel.registrarDevolucion(eq, p, context) {
+                                prestamosEncontrados.remove(p)
+                                if (prestamosEncontrados.isEmpty()) searchQuery = ""
+                                showReturnChoiceDialog = null
                             }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
-                ) {
-                    Text("FUNCIONANDO BIEN")
-                }
+                ) { Text("FUNCIONAL") }
             },
             dismissButton = {
                 Button(
                     onClick = { 
-                        showReturnChoiceDialog = false
+                        equipoParaDano = eq to p
+                        showReturnChoiceDialog = null
                         showDamageForm = true
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE53935))
-                ) {
-                    Text("TIENE DAÑOS")
-                }
+                ) { Text("TIENE DAÑOS") }
             }
         )
     }
 
-    if (showDamageForm && equipoSeleccionado != null) {
+    // Diálogo de Recepción Masiva
+    if (showBulkReturnDialog) {
+        AlertDialog(
+            onDismissRequest = { showBulkReturnDialog = false },
+            title = { Text("Recibir Todo") },
+            text = { Text("¿Confirmas la recepción de los ${prestamosEncontrados.size} equipos de este folio en buen estado?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showBulkReturnDialog = false
+                        coroutineScope.launch {
+                            val itemsToProcess = prestamosEncontrados.toList()
+                            itemsToProcess.forEach { p ->
+                                val eq = viewModel.equiposPrestados.find { it.id == p.idEquipo }
+                                if (eq != null) {
+                                    viewModel.registrarDevolucion(eq, p, context) {
+                                        prestamosEncontrados.remove(p)
+                                    }
+                                }
+                            }
+                            searchQuery = ""
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                ) { Text("SÍ, RECIBIR TODO") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBulkReturnDialog = false }) { Text("CANCELAR") }
+            }
+        )
+    }
+
+    if (showDamageForm && equipoParaDano != null) {
         FormularioDano(
             viewModel = viewModel,
-            equipo = equipoSeleccionado!!,
-            prestamo = prestamoInfo,
+            equipo = equipoParaDano!!.first,
+            prestamo = equipoParaDano!!.second,
             onDismiss = { showDamageForm = false },
             onSuccess = { 
+                prestamosEncontrados.remove(equipoParaDano!!.second)
+                if (prestamosEncontrados.isEmpty()) searchQuery = ""
                 showDamageForm = false
-                searchQuery = ""
-                equipoSeleccionado = null
+                equipoParaDano = null
             }
         )
     }
@@ -796,6 +815,7 @@ fun RetornoEquiposView(viewModel: InventarioViewModel) {
             onResult = { 
                 searchQuery = it.uppercase()
                 showOCR = false
+                buscar()
             },
             onDismiss = { showOCR = false }
         )
