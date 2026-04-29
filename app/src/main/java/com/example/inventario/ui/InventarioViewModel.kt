@@ -33,6 +33,8 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import com.example.inventario.util.ContratoGenerator
+import com.example.inventario.model.AppConfig
+import com.example.inventario.BuildConfig
 import android.content.Intent
 import androidx.core.content.FileProvider
 import java.util.Calendar
@@ -43,6 +45,10 @@ import java.util.UUID
 class InventarioViewModel(application: Application) : AndroidViewModel(application) {
     var sessionInitialized by mutableStateOf(false)
     var currentUserPerfil by mutableStateOf<Perfil?>(null)
+    
+    // Estado para actualización de la app
+    var appUpdateConfig by mutableStateOf<AppConfig?>(null)
+    var showUpdateDialog by mutableStateOf(false)
     
     fun isAdmin() = currentUserPerfil?.rol == "ADMIN"
     fun isViewer() = currentUserPerfil?.rol == "VIEWER"
@@ -870,6 +876,25 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
                 Log.e("Auth", "Sesión no encontrada")
             } finally {
                 sessionInitialized = true
+            }
+        }
+    }
+
+    fun checkForUpdates() {
+        viewModelScope.launch {
+            try {
+                val config = supabase.from("app_config")
+                    .select() {
+                        order("latest_version_code", Order.DESCENDING)
+                        limit(1)
+                    }.decodeSingleOrNull<AppConfig>()
+                
+                if (config != null && config.latest_version_code > BuildConfig.VERSION_CODE) {
+                    appUpdateConfig = config
+                    showUpdateDialog = true
+                }
+            } catch (e: Exception) {
+                Log.e("Update", "Error al verificar versión: ${e.message}")
             }
         }
     }

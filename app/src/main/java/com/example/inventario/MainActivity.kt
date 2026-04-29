@@ -62,7 +62,10 @@ import coil3.compose.AsyncImage
 import com.example.inventario.data.supabase
 import com.example.inventario.model.*
 import com.example.inventario.ui.InventarioViewModel
+import com.example.inventario.ui.MonitoringScreen
+import com.example.inventario.BuildConfig
 import com.example.inventario.ui.theme.InventarioTheme
+import com.example.inventario.util.UpdateManager
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -87,6 +90,22 @@ class MainActivity : ComponentActivity() {
 
                 LaunchedEffect(Unit) {
                     viewModel.verificarSesion()
+                    viewModel.checkForUpdates()
+                }
+
+                if (viewModel.showUpdateDialog && viewModel.appUpdateConfig != null) {
+                    UpdateDialog(
+                        config = viewModel.appUpdateConfig!!,
+                        onDismiss = { viewModel.showUpdateDialog = false },
+                        onUpdate = {
+                            viewModel.showUpdateDialog = false
+                            UpdateManager.downloadAndInstallApk(
+                                context = this@MainActivity,
+                                url = viewModel.appUpdateConfig!!.apk_url,
+                                versionName = viewModel.appUpdateConfig!!.latest_version_name
+                            )
+                        }
+                    )
                 }
 
                 if (!viewModel.sessionInitialized && currentScreen == "splash") {
@@ -108,6 +127,7 @@ class MainActivity : ComponentActivity() {
                             onNavigateToInventario = { currentScreen = "inventario" },
                             onNavigateToPrestamos = { currentScreen = "prestamos" },
                             onNavigateToUsuarios = { currentScreen = "usuarios" },
+                            onNavigateToMonitoreo = { currentScreen = "monitoreo" },
                             onLogout = { currentScreen = "login" }
                         )
                         "inventario" -> InventarioScreen(
@@ -120,6 +140,9 @@ class MainActivity : ComponentActivity() {
                         )
                         "usuarios" -> GestionUsuariosScreen(
                             viewModel = viewModel,
+                            onBack = { currentScreen = "home" }
+                        )
+                        "monitoreo" -> MonitoringScreen(
                             onBack = { currentScreen = "home" }
                         )
                     }
@@ -136,6 +159,7 @@ fun HomeScreen(
     onNavigateToInventario: () -> Unit,
     onNavigateToPrestamos: () -> Unit,
     onNavigateToUsuarios: () -> Unit,
+    onNavigateToMonitoreo: () -> Unit,
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -282,9 +306,9 @@ fun HomeScreen(
                     onClick = onNavigateToUsuarios,
                     modifier = Modifier
                         .fillMaxWidth(0.85f)
-                        .height(120.dp)
-                        .padding(8.dp),
-                    shape = RoundedCornerShape(24.dp),
+                        .height(80.dp)
+                        .padding(horizontal = 8.dp),
+                    shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
                 ) {
                     Row(
@@ -292,15 +316,36 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Icon(Icons.Default.Group, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.tertiary)
+                        Icon(Icons.Default.Group, null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.tertiary)
                         Spacer(modifier = Modifier.width(16.dp))
-                        Text("GESTIÓN DE USUARIOS", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("GESTIÓN DE USUARIOS", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                ElevatedCard(
+                    onClick = onNavigateToMonitoreo,
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .height(80.dp)
+                        .padding(horizontal = 8.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.Analytics, null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text("MONITOREO SUPABASE", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
             
             Spacer(modifier = Modifier.height(48.dp))
-            Text("v2.5.0 - Enterprise Edition", fontSize = 12.sp, color = Color.Gray)
+            Text("v${BuildConfig.VERSION_NAME} - Enterprise Edition", fontSize = 12.sp, color = Color.Gray)
         }
     }
 
@@ -2406,8 +2451,43 @@ fun LoginScreen(viewModel: InventarioViewModel, onLoginSuccess: () -> Unit) {
         }
         
         Spacer(modifier = Modifier.height(16.dp))
-        Text("v2.5.0 Security Patch", fontSize = 10.sp, color = Color.LightGray)
+        Text("v${BuildConfig.VERSION_NAME} Security Patch", fontSize = 10.sp, color = Color.LightGray)
     }
+}
+
+@Composable
+fun UpdateDialog(
+    config: AppConfig,
+    onDismiss: () -> Unit,
+    onUpdate: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.SystemUpdate, null, tint = MaterialTheme.colorScheme.primary) },
+        title = { Text("Actualización Disponible") },
+        text = {
+            Column {
+                Text("Hay una nueva versión de Inventario disponible (${config.latest_version_name}).")
+                if (!config.release_notes.isNullOrEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Novedades:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(config.release_notes, fontSize = 12.sp, color = Color.Gray)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("¿Deseas descargarla e instalarla ahora?", fontSize = 12.sp)
+            }
+        },
+        confirmButton = {
+            Button(onClick = onUpdate) {
+                Text("ACTUALIZAR")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("MÁS TARDE")
+            }
+        }
+    )
 }
 
 
