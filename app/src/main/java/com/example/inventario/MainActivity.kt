@@ -453,7 +453,7 @@ fun InventarioScreen(viewModel: InventarioViewModel, onBack: () -> Unit) {
                     } else {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(16.dp),
+                            contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 80.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             items(items) { equipo ->
@@ -476,6 +476,24 @@ fun InventarioScreen(viewModel: InventarioViewModel, onBack: () -> Unit) {
                                         }
                                     }
                                 )
+                            }
+
+                            // Botón o indicador de carga al final
+                            if (viewModel.canLoadMore && viewModel.searchQuery.isEmpty()) {
+                                item {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (viewModel.isLoadingMore) {
+                                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                        } else {
+                                            TextButton(onClick = { viewModel.fetchEquipos(loadMore = true) }) {
+                                                Text("CARGAR MÁS EQUIPOS")
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

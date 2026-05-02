@@ -60,6 +60,12 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
     var searchQuery by mutableStateOf("")
     var isTrashMode by mutableStateOf(false)
 
+    // Paginación
+    private var currentOffset = 0
+    private val PAGE_SIZE = 20
+    var canLoadMore by mutableStateOf(true)
+    var isLoadingMore by mutableStateOf(false)
+
     // Selección para préstamos
     val equiposSeleccionados = mutableStateListOf<Equipo>()
     
@@ -128,9 +134,18 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun fetchEquipos() {
+    fun fetchEquipos(loadMore: Boolean = false) {
         viewModelScope.launch {
-            isLoading = true
+            if (loadMore) {
+                if (!canLoadMore || isLoadingMore) return@launch
+                isLoadingMore = true
+            } else {
+                isLoading = true
+                currentOffset = 0
+                canLoadMore = true
+                _equipos.clear()
+            }
+            
             errorMessage = null
             try {
                 // Filtramos según el modo (Normal o Papelera)
@@ -146,48 +161,62 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
                             }
                         }
                         order("no_inventario", Order.ASCENDING)
+                        range(currentOffset.toLong(), (currentOffset + PAGE_SIZE - 1).toLong())
                     }
                     .decodeList<Equipo>()
-                _equipos.clear()
+                
                 _equipos.addAll(results)
+                currentOffset += results.size
+                canLoadMore = results.size == PAGE_SIZE
                 
                 // Actualizar sugerencias solo con equipos activos para que no salgan cosas borradas
                 if (!isTrashMode) {
+                    // Sugerencias: Para que las sugerencias sean completas, lo ideal sería cargarlas aparte,
+                    // pero para no saturar, las actualizamos con lo que vamos cargando.
+                    val cats = _equipos.mapNotNull { it.categoria }.distinct().filter { it.isNotBlank() }.sorted()
                     categoriasExistentes.clear()
-                    categoriasExistentes.addAll(results.mapNotNull { it.categoria }.distinct().filter { it.isNotBlank() }.sorted())
+                    categoriasExistentes.addAll(cats)
+                    
+                    val marcas = _equipos.mapNotNull { it.marca }.distinct().filter { it.isNotBlank() }.sorted()
                     marcasExistentes.clear()
-                    marcasExistentes.addAll(results.mapNotNull { it.marca }.distinct().filter { it.isNotBlank() }.sorted())
+                    marcasExistentes.addAll(marcas)
+                    
+                    val models = _equipos.mapNotNull { it.modelo }.distinct().filter { it.isNotBlank() }.sorted()
                     modelosExistentes.clear()
-                    modelosExistentes.addAll(results.mapNotNull { it.modelo }.distinct().filter { it.isNotBlank() }.sorted())
+                    modelosExistentes.addAll(models)
                 }
 
-                // Cargar nombres con préstamos activos
-                val pActivos = supabase.from("prestamos")
-                    .select() {
-                        filter { eq("estado", "activo") }
-                    }.decodeList<Prestamo>()
-                
-                prestamosActivos.clear()
-                prestamosActivos.addAll(pActivos)
-                
-                nombresConPrestamosActivos.clear()
-                nombresConPrestamosActivos.addAll(pActivos.mapNotNull { it.nombreComodatario }.distinct())
-                
-                // Cargar Historial (últimos 100 préstamos devueltos)
-                val pHistorial = supabase.from("prestamos")
-                    .select() {
-                        filter { eq("estado", "devuelto") }
-                        order("fecha_devolucion", Order.DESCENDING)
-                        limit(100)
-                    }.decodeList<Prestamo>()
-                historialPrestamos.clear()
-                historialPrestamos.addAll(pHistorial)
+                // Cargar datos adicionales solo en la primera carga
+                if (!loadMore) {
+                    // Cargar nombres con préstamos activos
+                    val pActivos = supabase.from("prestamos")
+                        .select() {
+                            filter { eq("estado", "activo") }
+                        }.decodeList<Prestamo>()
+                    
+                    prestamosActivos.clear()
+                    prestamosActivos.addAll(pActivos)
+                    
+                    nombresConPrestamosActivos.clear()
+                    nombresConPrestamosActivos.addAll(pActivos.mapNotNull { it.nombreComodatario }.distinct())
+                    
+                    // Cargar Historial (últimos 100 préstamos devueltos)
+                    val pHistorial = supabase.from("prestamos")
+                        .select() {
+                            filter { eq("estado", "devuelto") }
+                            order("fecha_devolucion", Order.DESCENDING)
+                            limit(100)
+                        }.decodeList<Prestamo>()
+                    historialPrestamos.clear()
+                    historialPrestamos.addAll(pHistorial)
+                }
                 
             } catch (e: Exception) {
                 errorMessage = "Error: ${e.message}"
                 e.printStackTrace()
             } finally {
                 isLoading = false
+                isLoadingMore = false
             }
         }
     }
@@ -833,9 +862,28 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
                 // Esperar un momento para que la sesión se asiente
                 val user = supabase.auth.currentUserOrNull()
                 if (user != null) {
-                    val perfil = supabase.from("perfiles").select {
+                    var perfil = supabase.from("perfiles").select {
                         filter { eq("id", user.id) }
                     }.decodeSingleOrNull<Perfil>()
+                    
+                    // SI EL PERFIL NO EXISTE (Caso de usuario borrado de perfiles pero no de auth)
+                    if (perfil == null) {
+                        val nuevoPerfil = Perfil(
+                            id = user.id,
+                            nombre = user.email?.substringBefore("@") ?: "Usuario",
+                            rol = "USER"
+                        )
+                        try {
+                            supabase.from("perfiles").insert(nuevoPerfil)
+                            perfil = nuevoPerfil
+                            Log.d("Auth", "Perfil recuperado/creado automáticamente para ${user.email}")
+                        } catch (e: Exception) {
+                            Log.e("Auth", "No se pudo auto-crear el perfil: ${e.message}")
+                            errorMessage = "Error al crear perfil: ${e.message}. Contacte al administrador para revisar las políticas RLS."
+                            isLoading = false
+                            return@launch // Detener el login si no se puede crear el perfil básico
+                        }
+                    }
                     
                     currentUserPerfil = perfil ?: Perfil(id = user.id, nombre = email.substringBefore("@"), rol = "USER")
                     onSuccess()
