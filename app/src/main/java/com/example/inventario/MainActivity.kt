@@ -91,6 +91,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     viewModel.verificarSesion()
                     viewModel.checkForUpdates()
+                    viewModel.fetchSystemDna()
                 }
 
                 if (viewModel.showUpdateDialog && viewModel.appUpdateConfig != null) {
@@ -1665,11 +1666,27 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                     }
 
                     // Campos de texto
+                    val invRule = viewModel.getRule("INV_NUMBER")
+                    val invMaxLen = invRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 8
+                    val invRegex = invRule?.technicalSpecs?.get("regex")?.toString()?.replace("\"", "") ?: "^[A-Z]{3}[0-9]{5}$"
+
                     OutlinedTextField(
                         value = noInventario,
-                        onValueChange = { noInventario = it.uppercase() },
+                        onValueChange = { 
+                            if (it.length <= invMaxLen) {
+                                noInventario = it.uppercase() 
+                            }
+                        },
                         label = { Text("Número de Inventario *") },
                         modifier = Modifier.fillMaxWidth(),
+                        isError = noInventario.isNotEmpty() && !noInventario.matches(Regex(invRegex)),
+                        supportingText = {
+                            if (noInventario.isNotEmpty() && !noInventario.matches(Regex(invRegex))) {
+                                Text("Formato: 3 letras + 5 números", color = MaterialTheme.colorScheme.error)
+                            } else {
+                                Text("${noInventario.length}/$invMaxLen")
+                            }
+                        },
                         leadingIcon = { Icon(Icons.Default.Tag, null) },
                         trailingIcon = {
                             Row {

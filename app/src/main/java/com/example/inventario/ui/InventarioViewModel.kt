@@ -34,6 +34,7 @@ import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import com.example.inventario.util.ContratoGenerator
 import com.example.inventario.model.AppConfig
+import com.example.inventario.model.SystemDna
 import com.example.inventario.BuildConfig
 import android.content.Intent
 import androidx.core.content.FileProvider
@@ -49,6 +50,10 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
     // Estado para actualización de la app
     var appUpdateConfig by mutableStateOf<AppConfig?>(null)
     var showUpdateDialog by mutableStateOf(false)
+    
+    // Diccionario Sistémico (ADN)
+    val systemDna = mutableStateListOf<SystemDna>()
+    var isDnaLoaded by mutableStateOf(false)
     
     fun isAdmin() = currentUserPerfil?.rol == "ADMIN"
     fun isViewer() = currentUserPerfil?.rol == "VIEWER"
@@ -945,5 +950,26 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
                 Log.e("Update", "Error al verificar versión: ${e.message}")
             }
         }
+    }
+
+    fun fetchSystemDna() {
+        viewModelScope.launch {
+            try {
+                val results = supabase.from("system_dna").select().decodeList<SystemDna>()
+                systemDna.clear()
+                systemDna.addAll(results)
+                isDnaLoaded = true
+                Log.d("DNA", "Diccionario Sistémico cargado: ${results.size} componentes")
+            } catch (e: Exception) {
+                Log.e("DNA", "Error cargando ADN: ${e.message}")
+            }
+        }
+    }
+
+    fun getRule(key: String) = systemDna.find { it.componentKey == key }
+
+    fun isComponentActive(key: String): Boolean {
+        val component = getRule(key) ?: return true // Si no existe, asumimos activo por compatibilidad
+        return component.status == "ACTIVO"
     }
 }
