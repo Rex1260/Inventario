@@ -1731,17 +1731,25 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                         singleLine = true
                     )
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (equipoExistente == null) {
+                        // En creación: Categoría ocupa todo el ancho
                         ExposedDropdownField(
                             label = "Categoría",
                             value = categoria,
                             options = viewModel.categoriasExistentes,
                             onValueChange = { categoria = it },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        
-                        // Estado: Oculto en creación, visible en edición
-                        if (equipoExistente != null) {
+                    } else {
+                        // En edición: Categoría y Estado comparten el ancho
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ExposedDropdownField(
+                                label = "Categoría",
+                                value = categoria,
+                                options = viewModel.categoriasExistentes,
+                                onValueChange = { categoria = it },
+                                modifier = Modifier.weight(1f)
+                            )
                             ExposedDropdownField(
                                 label = "Estado",
                                 value = estado,
@@ -1749,10 +1757,6 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                                 onValueChange = { estado = it },
                                 modifier = Modifier.weight(1f)
                             )
-                        } else {
-                            // Espacio vacío para mantener simetría o simplemente dejar que Categoría crezca
-                            // En este caso, dejamos que Categoría tome el espacio si prefieres, 
-                            // o ponemos un Spacer. Vamos a dejar que Categoría ocupe el Row si es nuevo.
                         }
                     }
 
