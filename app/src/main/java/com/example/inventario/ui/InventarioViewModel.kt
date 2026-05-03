@@ -20,6 +20,7 @@ import com.example.inventario.model.Equipo
 import com.example.inventario.model.Prestamo
 import com.example.inventario.model.Usuario
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.storage.storage
@@ -175,25 +176,25 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
                 currentOffset += results.size
                 canLoadMore = results.size == PAGE_SIZE
                 
-                // Actualizar sugerencias solo con equipos activos para que no salgan cosas borradas
+                // Actualizar sugerencias: Cargamos todos los valores únicos (independiente de la paginación de la lista)
                 if (!isTrashMode) {
-                    // Sugerencias: Para que las sugerencias sean completas, lo ideal sería cargarlas aparte,
-                    // pero para no saturar, las actualizamos con lo que vamos cargando.
-                    val cats = _equipos.mapNotNull { it.categoria }.distinct().filter { it.isNotBlank() }.sorted()
+                    val metadata = supabase.from("equipos")
+                        .select(columns = Columns.list("categoria", "marca", "modelo", "nombre")) {
+                            filter { filter("deleted_at", FilterOperator.IS, null) }
+                        }
+                        .decodeList<Equipo>()
+                    
                     categoriasExistentes.clear()
-                    categoriasExistentes.addAll(cats)
+                    categoriasExistentes.addAll(metadata.mapNotNull { it.categoria }.distinct().filter { it.isNotBlank() }.sorted())
                     
-                    val marcas = _equipos.mapNotNull { it.marca }.distinct().filter { it.isNotBlank() }.sorted()
                     marcasExistentes.clear()
-                    marcasExistentes.addAll(marcas)
+                    marcasExistentes.addAll(metadata.mapNotNull { it.marca }.distinct().filter { it.isNotBlank() }.sorted())
                     
-                    val models = _equipos.mapNotNull { it.modelo }.distinct().filter { it.isNotBlank() }.sorted()
                     modelosExistentes.clear()
-                    modelosExistentes.addAll(models)
+                    modelosExistentes.addAll(metadata.mapNotNull { it.modelo }.distinct().filter { it.isNotBlank() }.sorted())
 
-                    val names = _equipos.mapNotNull { it.nombre }.distinct().filter { it.isNotBlank() }.sorted()
                     nombresExistentes.clear()
-                    nombresExistentes.addAll(names)
+                    nombresExistentes.addAll(metadata.mapNotNull { it.nombre }.distinct().filter { it.isNotBlank() }.sorted())
                 }
 
                 // Cargar datos adicionales solo en la primera carga

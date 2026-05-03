@@ -1971,8 +1971,7 @@ fun ExposedDropdownField(
         if (filteredOptions.isNotEmpty()) {
             ExposedDropdownMenu(
                 expanded = expanded,
-                onDismissRequest = { expanded = false },
-                properties = ExposedDropdownMenuDefaults.Properties
+                onDismissRequest = { expanded = false }
             ) {
                 filteredOptions.forEach { option ->
                     DropdownMenuItem(
