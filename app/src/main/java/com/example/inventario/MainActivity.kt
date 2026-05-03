@@ -1722,13 +1722,13 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                     )
 
                     val nomMaxLen = nomRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 100
-                    OutlinedTextField(
+                    ExposedDropdownField(
+                        label = "${nomRule?.displayName ?: "Nombre del Equipo"} *",
                         value = nombre,
+                        options = viewModel.nombresExistentes,
                         onValueChange = { if (it.length <= nomMaxLen) nombre = it.uppercase() },
-                        label = { Text("${nomRule?.displayName ?: "Nombre del Equipo"} *") },
                         modifier = Modifier.fillMaxWidth(),
-                        supportingText = { Text("${nombre.length}/$nomMaxLen") },
-                        singleLine = true
+                        supportingText = { Text("${nombre.length}/$nomMaxLen") }
                     )
 
                     if (equipoExistente == null) {
@@ -1737,7 +1737,7 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                             label = "Categoría",
                             value = categoria,
                             options = viewModel.categoriasExistentes,
-                            onValueChange = { categoria = it },
+                            onValueChange = { categoria = it.uppercase() },
                             modifier = Modifier.fillMaxWidth()
                         )
                     } else {
@@ -1747,7 +1747,7 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                                 label = "Categoría",
                                 value = categoria,
                                 options = viewModel.categoriasExistentes,
-                                onValueChange = { categoria = it },
+                                onValueChange = { categoria = it.uppercase() },
                                 modifier = Modifier.weight(1f)
                             )
                             ExposedDropdownField(
@@ -1765,14 +1765,14 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                             label = "Marca",
                             value = marca,
                             options = viewModel.marcasExistentes,
-                            onValueChange = { marca = it },
+                            onValueChange = { marca = it.uppercase() },
                             modifier = Modifier.weight(1f)
                         )
                         ExposedDropdownField(
                             label = "Modelo",
                             value = modelo,
                             options = viewModel.modelosExistentes,
-                            onValueChange = { modelo = it },
+                            onValueChange = { modelo = it.uppercase() },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -1934,31 +1934,54 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExposedDropdownField(label: String, value: String, options: List<String>, onValueChange: (String) -> Unit, modifier: Modifier = Modifier) {
+fun ExposedDropdownField(
+    label: String, 
+    value: String, 
+    options: List<String>, 
+    onValueChange: (String) -> Unit, 
+    modifier: Modifier = Modifier,
+    supportingText: @Composable (() -> Unit)? = null,
+    isError: Boolean = false
+) {
     var expanded by remember { mutableStateOf(false) }
+    val filteredOptions = remember(value, options) {
+        if (value.isEmpty()) options else options.filter { it.contains(value, ignoreCase = true) }
+    }
+
     ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = !expanded },
+        expanded = expanded && filteredOptions.isNotEmpty(),
+        onExpandedChange = { expanded = it },
         modifier = modifier
     ) {
         OutlinedTextField(
             value = value,
-            onValueChange = { onValueChange(it) },
+            onValueChange = { 
+                onValueChange(it)
+                expanded = true
+            },
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
             modifier = Modifier.menuAnchor(),
-            singleLine = true
+            singleLine = true,
+            supportingText = supportingText,
+            isError = isError
         )
-        if (options.isNotEmpty()) {
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                options.forEach { option ->
+        
+        if (filteredOptions.isNotEmpty()) {
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                properties = ExposedDropdownMenuDefaults.Properties
+            ) {
+                filteredOptions.forEach { option ->
                     DropdownMenuItem(
                         text = { Text(option) },
                         onClick = {
                             onValueChange(option)
                             expanded = false
-                        }
+                        },
+                        contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
                     )
                 }
             }

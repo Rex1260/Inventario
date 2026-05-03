@@ -94,6 +94,7 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
     val categoriasExistentes = mutableStateListOf<String>()
     val marcasExistentes = mutableStateListOf<String>()
     val modelosExistentes = mutableStateListOf<String>()
+    val nombresExistentes = mutableStateListOf<String>()
 
     val filteredEquipos by derivedStateOf {
         if (searchQuery.isBlank()) {
@@ -189,6 +190,10 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
                     val models = _equipos.mapNotNull { it.modelo }.distinct().filter { it.isNotBlank() }.sorted()
                     modelosExistentes.clear()
                     modelosExistentes.addAll(models)
+
+                    val names = _equipos.mapNotNull { it.nombre }.distinct().filter { it.isNotBlank() }.sorted()
+                    nombresExistentes.clear()
+                    nombresExistentes.addAll(names)
                 }
 
                 // Cargar datos adicionales solo en la primera carga
