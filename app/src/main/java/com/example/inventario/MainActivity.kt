@@ -1154,14 +1154,20 @@ fun FormularioResguardo(viewModel: InventarioViewModel, onDismiss: () -> Unit, o
 
                 Text("Comodatario (Recibe):", fontWeight = FontWeight.Bold)
                 if (viewModel.usuarioSeleccionado == null) {
+                    val prNomRule = viewModel.getRule("PR_COMO")
+                    val prNomMaxLen = prNomRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 100
+
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { 
-                            searchQuery = it
-                            viewModel.buscarUsuarios(it)
+                            if (it.length <= prNomMaxLen) {
+                                searchQuery = it
+                                viewModel.buscarUsuarios(it)
+                            }
                         },
                         placeholder = { Text("Buscar nombre o correo...") },
                         modifier = Modifier.fillMaxWidth(),
+                        supportingText = { Text("${searchQuery.length}/$prNomMaxLen") },
                         leadingIcon = { Icon(Icons.Default.PersonSearch, null) },
                         shape = RoundedCornerShape(12.dp)
                     )
@@ -1337,11 +1343,15 @@ fun FormularioDano(viewModel: InventarioViewModel, equipo: Equipo, prestamo: Pre
 
                 Spacer(modifier = Modifier.height(16.dp))
                 
+                val danoRule = viewModel.getRule("DAN_DESC")
+                val danoMaxLen = danoRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 500
+
                 OutlinedTextField(
                     value = descripcion,
-                    onValueChange = { descripcion = it },
-                    label = { Text("Descripción del daño") },
+                    onValueChange = { if (it.length <= danoMaxLen) descripcion = it },
+                    label = { Text(danoRule?.displayName ?: "Descripción del daño") },
                     modifier = Modifier.fillMaxWidth(),
+                    supportingText = { Text("${descripcion.length}/$danoMaxLen") },
                     minLines = 3,
                     shape = RoundedCornerShape(12.dp)
                 )
@@ -1665,10 +1675,16 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                         }
                     }
 
-                    // Campos de texto
-                    val invRule = viewModel.getRule("INV_NUMBER")
+                    // Reglas dinámicas desde el ADN
+                    val invRule = viewModel.getRule("EQ_INV") ?: viewModel.getRule("INV_NUMBER")
+                    val nomRule = viewModel.getRule("EQ_NOMBRE")
+                    val descRule = viewModel.getRule("EQ_DESC")
+                    val serRule = viewModel.getRule("EQ_SERIE")
+                    val tagRule = viewModel.getRule("EQ_TAG")
+
                     val invMaxLen = invRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 8
                     val invRegex = invRule?.technicalSpecs?.get("regex")?.toString()?.replace("\"", "") ?: "^[A-Z]{3}[0-9]{5}$"
+                    val sugTriggerLen = invRule?.technicalSpecs?.get("suggestion_trigger_len")?.toString()?.toIntOrNull() ?: 3
 
                     OutlinedTextField(
                         value = noInventario,
@@ -1677,7 +1693,7 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                                 noInventario = it.uppercase() 
                             }
                         },
-                        label = { Text("Número de Inventario *") },
+                        label = { Text("${invRule?.displayName ?: "Número de Inventario"} *") },
                         modifier = Modifier.fillMaxWidth(),
                         isError = noInventario.isNotEmpty() && !noInventario.matches(Regex(invRegex)),
                         supportingText = {
@@ -1695,7 +1711,7 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                                     showOCR = true 
                                 }) { Icon(Icons.Default.QrCodeScanner, null, tint = MaterialTheme.colorScheme.primary) }
                                 
-                                if (noInventario.length == 3) {
+                                if (noInventario.length == sugTriggerLen) {
                                     IconButton(onClick = { noInventario = viewModel.sugerirSiguienteNumero(noInventario) }) {
                                         Icon(Icons.Default.AutoFixHigh, null, tint = Color.Blue)
                                     }
@@ -1705,11 +1721,13 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                         singleLine = true
                     )
 
+                    val nomMaxLen = nomRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 100
                     OutlinedTextField(
                         value = nombre,
-                        onValueChange = { nombre = it },
-                        label = { Text("Nombre del Equipo *") },
+                        onValueChange = { if (it.length <= nomMaxLen) nombre = it.uppercase() },
+                        label = { Text("${nomRule?.displayName ?: "Nombre del Equipo"} *") },
                         modifier = Modifier.fillMaxWidth(),
+                        supportingText = { Text("${nombre.length}/$nomMaxLen") },
                         singleLine = true
                     )
 
@@ -1721,13 +1739,21 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                             onValueChange = { categoria = it },
                             modifier = Modifier.weight(1f)
                         )
-                        ExposedDropdownField(
-                            label = "Estado",
-                            value = estado,
-                            options = listOf("FUNCIONAL", "OBSOLETO", "DESCOMPUESTO", "EN MANTENIMIENTO"),
-                            onValueChange = { estado = it },
-                            modifier = Modifier.weight(1f)
-                        )
+                        
+                        // Estado: Oculto en creación, visible en edición
+                        if (equipoExistente != null) {
+                            ExposedDropdownField(
+                                label = "Estado",
+                                value = estado,
+                                options = listOf("FUNCIONAL", "OBSOLETO", "DESCOMPUESTO", "EN MANTENIMIENTO"),
+                                onValueChange = { estado = it },
+                                modifier = Modifier.weight(1f)
+                            )
+                        } else {
+                            // Espacio vacío para mantener simetría o simplemente dejar que Categoría crezca
+                            // En este caso, dejamos que Categoría tome el espacio si prefieres, 
+                            // o ponemos un Spacer. Vamos a dejar que Categoría ocupe el Row si es nuevo.
+                        }
                     }
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1747,11 +1773,13 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                         )
                     }
 
+                    val serMaxLen = serRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 50
                     OutlinedTextField(
                         value = serie,
-                        onValueChange = { serie = it.uppercase() },
-                        label = { Text("Número de Serie") },
+                        onValueChange = { if (it.length <= serMaxLen) serie = it.uppercase() },
+                        label = { Text(serRule?.displayName ?: "Número de Serie") },
                         modifier = Modifier.fillMaxWidth(),
+                        supportingText = { Text("${serie.length}/$serMaxLen") },
                         trailingIcon = {
                             IconButton(onClick = { 
                                 ocrTarget = "serie"
@@ -1761,11 +1789,13 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                         singleLine = true
                     )
 
+                    val tagMaxLen = tagRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 50
                     OutlinedTextField(
                         value = tag,
-                        onValueChange = { tag = it.uppercase() },
-                        label = { Text("Número de TAG") },
+                        onValueChange = { if (it.length <= tagMaxLen) tag = it.uppercase() },
+                        label = { Text(tagRule?.displayName ?: "Número de TAG") },
                         modifier = Modifier.fillMaxWidth(),
+                        supportingText = { Text("${tag.length}/$tagMaxLen") },
                         trailingIcon = {
                             IconButton(onClick = { 
                                 ocrTarget = "tag"
@@ -1775,15 +1805,18 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                         singleLine = true
                     )
 
+                    val descMaxLen = descRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 500
                     OutlinedTextField(
                         value = descripcion,
-                        onValueChange = { descripcion = it },
-                        label = { Text("Descripción / Notas") },
+                        onValueChange = { if (it.length <= descMaxLen) descripcion = it },
+                        label = { Text(descRule?.displayName ?: "Descripción / Notas") },
                         modifier = Modifier.fillMaxWidth(),
+                        supportingText = { Text("${descripcion.length}/$descMaxLen") },
                         minLines = 3
                     )
                     
                     if (equipoExistente != null && !viewModel.isTrashMode) {
+                        val isPrestado = equipoExistente.estado == "PRESTADO"
                         Button(
                             onClick = {
                                 viewModel.eliminarEquipoLogico(equipoExistente, context) {
@@ -1791,11 +1824,14 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isPrestado) Color.Gray else Color.Red
+                            ),
+                            enabled = !isPrestado
                         ) {
-                            Icon(Icons.Default.Delete, null)
+                            Icon(if (isPrestado) Icons.Default.Lock else Icons.Default.Delete, null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("MOVER A PAPELERA")
+                            Text(if (isPrestado) "PRESTADO (NO ELIMINABLE)" else "MOVER A PAPELERA")
                         }
                     }
                     

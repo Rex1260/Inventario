@@ -577,6 +577,10 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun eliminarEquipoLogico(equipo: Equipo, context: android.content.Context, onSuccess: () -> Unit) {
+        if (equipo.estado == "PRESTADO") {
+            Toast.makeText(context, "No se puede eliminar un equipo que está PRESTADO. Regístralo como devuelto primero.", Toast.LENGTH_LONG).show()
+            return
+        }
         viewModelScope.launch {
             isLoading = true
             try {
