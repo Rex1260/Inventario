@@ -1009,13 +1009,44 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun applyTemplate(plantilla: Plantilla): Map<String, String?> {
-        return mapOf(
-            "nombre" to plantilla.equipoNombre,
-            "categoria" to plantilla.categoria,
-            "marca" to plantilla.marca,
-            "modelo" to plantilla.modelo,
-            "descripcion" to plantilla.descripcionDefault
-        )
+        val result = mutableMapOf<String, String?>()
+        plantilla.equipoNombre?.let { result["nombre"] = it }
+        plantilla.categoria?.let { result["categoria"] = it }
+        plantilla.marca?.let { result["marca"] = it }
+        plantilla.modelo?.let { result["modelo"] = it }
+        plantilla.descripcionDefault?.let { result["descripcion"] = it }
+        return result
+    }
+
+    fun saveAsTemplate(
+        nombrePlantilla: String,
+        nombre: String?,
+        categoria: String?,
+        marca: String?,
+        modelo: String?,
+        descripcion: String?,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                val nuevaPlantilla = Plantilla(
+                    nombrePlantilla = nombrePlantilla,
+                    equipoNombre = nombre,
+                    categoria = categoria,
+                    marca = marca,
+                    modelo = modelo,
+                    descripcionDefault = descripcion
+                )
+                supabase.from("plantillas").insert(nuevaPlantilla)
+                fetchPlantillas()
+                onSuccess()
+            } catch (e: Exception) {
+                errorMessage = "Error al guardar plantilla: ${e.message}"
+            } finally {
+                isLoading = false
+            }
+        }
     }
 
     fun cloneToTemplate(
@@ -1034,13 +1065,31 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
                     modelo = equipo.modelo,
                     descripcionDefault = equipo.descripcion
                 )
-                supabase.from("plantillas").insert(nuevaPlantilla)
+                // Usar upsert para manejar conflictos de nombre único
+                supabase.from("plantillas").upsert(nuevaPlantilla) {
+                    onConflict = "nombre_plantilla"
+                }
                 fetchPlantillas()
                 onSuccess()
             } catch (e: Exception) {
                 errorMessage = "Error al clonar: ${e.message}"
             } finally {
                 isLoading = false
+            }
+        }
+    }
+
+    fun eliminarPlantilla(id: Int, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                supabase.from("plantillas")
+                    .update(mapOf("is_active" to false)) {
+                        filter { eq("id", id) }
+                    }
+                fetchPlantillas()
+                onSuccess()
+            } catch (e: Exception) {
+                errorMessage = "Error al eliminar: ${e.message}"
             }
         }
     }

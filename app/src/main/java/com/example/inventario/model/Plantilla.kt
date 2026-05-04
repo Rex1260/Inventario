@@ -2,6 +2,7 @@ package com.example.inventario.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 @Serializable
 data class Plantilla(
@@ -20,7 +21,7 @@ data class Plantilla(
     @SerialName("descripcion_default")
     val descripcionDefault: String? = null,
     @SerialName("specs_json")
-    val specsJson: String = "{}",
+    val specsJson: JsonElement? = null,
     @SerialName("is_active")
     val isActive: Boolean = true,
     @SerialName("created_at")

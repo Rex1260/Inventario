@@ -629,6 +629,7 @@ fun SalidaEquiposView(viewModel: InventarioViewModel) {
 @Composable
 fun RetornoEquiposView(viewModel: InventarioViewModel) {
     var searchQuery by remember { mutableStateOf("") }
+    var employeeSearchQuery by remember { mutableStateOf("") }
     var showOCR by remember { mutableStateOf(false) }
     
     // Lista de préstamos encontrados para devolver
@@ -689,7 +690,65 @@ fun RetornoEquiposView(viewModel: InventarioViewModel) {
         }
     }
 
+    // Filtrar préstamos por nombre de empleado en tiempo real
+    val filteredByEmployee = remember(employeeSearchQuery, viewModel.prestamosActivos) {
+        if (employeeSearchQuery.isBlank()) {
+            emptyList()
+        } else {
+            viewModel.prestamosActivos.filter { prestamo ->
+                prestamo.nombreComodatario?.contains(employeeSearchQuery, ignoreCase = true) == true
+            }.distinctBy { it.nombreComodatario }
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
+        // Búsqueda por nombre de empleado (tiempo real)
+        OutlinedTextField(
+            value = employeeSearchQuery,
+            onValueChange = { employeeSearchQuery = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            placeholder = { Text("Buscar por nombre de empleado...") },
+            leadingIcon = { Icon(Icons.Default.Person, null) },
+            trailingIcon = {
+                if (employeeSearchQuery.isNotEmpty()) {
+                    IconButton(onClick = { 
+                        employeeSearchQuery = ""
+                    }) { Icon(Icons.Default.Clear, null) }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp)
+        )
+        
+        // Mostrar resultados de búsqueda por empleado
+        if (employeeSearchQuery.isNotBlank() && filteredByEmployee.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                    items(filteredByEmployee) { prestamo ->
+                        Button(
+                            onClick = {
+                                // Cargar todos los préstamos de este empleado
+                                val prestamosDelEmpleado = viewModel.prestamosActivos.filter { 
+                                    it.nombreComodatario == prestamo.nombreComodatario 
+                                }
+                                prestamosEncontrados.clear()
+                                prestamosEncontrados.addAll(prestamosDelEmpleado)
+                                employeeSearchQuery = ""
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(4.dp)
+                        ) {
+                            Text(prestamo.nombreComodatario ?: "SIN NOMBRE", fontSize = 14.sp)
+                        }
+                        HorizontalDivider()
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
         Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = searchQuery,
@@ -1614,15 +1673,18 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                             }) {
                                 Icon(Icons.Default.History, "Historial de Daños", tint = MaterialTheme.colorScheme.error)
                             }
-                            // Botón Clonar a Plantilla
-                            IconButton(onClick = { showCloneDialog = true }) {
-                                Icon(Icons.Default.ContentCopy, "Clonar a Plantilla", tint = MaterialTheme.colorScheme.primary)
-                            }
-                        } else {
-                            // Botón de Plantillas (solo en creación)
+                        }
+                        
+                        // Botón de Plantillas (Cargar) - Solo si es nuevo equipo
+                        if (equipoExistente == null) {
                             IconButton(onClick = { showTemplateSelector = true }) {
                                 Icon(Icons.Default.AutoMode, "Cargar Plantilla", tint = MaterialTheme.colorScheme.primary)
                             }
+                        }
+
+                        // Botón de Guardar como Plantilla (NUEVO: Visible en ambos casos)
+                        IconButton(onClick = { showCloneDialog = true }) {
+                            Icon(Icons.Default.BookmarkAdd, "Guardar como Plantilla", tint = Color(0xFF4CAF50))
                         }
 
                         TextButton(
@@ -1967,24 +2029,39 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                                 Card(
                                     onClick = {
                                         val templateData = viewModel.applyTemplate(plantilla)
-                                        nombre = templateData["nombre"] ?: ""
-                                        categoria = templateData["categoria"] ?: ""
-                                        marca = templateData["marca"] ?: ""
-                                        modelo = templateData["modelo"] ?: ""
-                                        descripcion = templateData["descripcion"] ?: ""
+                                        templateData["nombre"]?.let { nombre = it }
+                                        templateData["categoria"]?.let { categoria = it }
+                                        templateData["marca"]?.let { marca = it }
+                                        templateData["modelo"]?.let { modelo = it }
+                                        templateData["descripcion"]?.let { descripcion = it }
                                         showTemplateSelector = false
                                         Toast.makeText(context, "Plantilla '${plantilla.nombrePlantilla}' cargada", Toast.LENGTH_SHORT).show()
                                     },
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                                 ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Text(plantilla.nombrePlantilla, fontWeight = FontWeight.Bold)
-                                        if (!plantilla.equipoNombre.isNullOrEmpty()) {
-                                            Text("Equipo: ${plantilla.equipoNombre}", fontSize = 12.sp, color = Color.Gray)
+                                    Row(
+                                        modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(plantilla.nombrePlantilla, fontWeight = FontWeight.Bold)
+                                            if (!plantilla.equipoNombre.isNullOrEmpty()) {
+                                                Text("Equipo: ${plantilla.equipoNombre}", fontSize = 12.sp, color = Color.Gray)
+                                            }
+                                            if (!plantilla.categoria.isNullOrEmpty()) {
+                                                Text("Categoría: ${plantilla.categoria}", fontSize = 12.sp)
+                                            }
                                         }
-                                        if (!plantilla.categoria.isNullOrEmpty()) {
-                                            Text("Categoría: ${plantilla.categoria}", fontSize = 12.sp)
+                                        IconButton(
+                                            onClick = {
+                                                viewModel.eliminarPlantilla(plantilla.id!!) {
+                                                    Toast.makeText(context, "Plantilla eliminada", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        ) {
+                                            Icon(Icons.Default.Delete, "Eliminar", tint = Color.Red.copy(alpha = 0.7f))
                                         }
                                     }
                                 }
@@ -2002,18 +2079,18 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
     }
     
     // Clone to Template Dialog
-    if (showCloneDialog && equipoExistente != null) {
+    if (showCloneDialog) {
         AlertDialog(
             onDismissRequest = { showCloneDialog = false },
-            title = { Text("Clonar a Plantilla", fontWeight = FontWeight.Bold) },
+            title = { Text("Guardar como Plantilla", fontWeight = FontWeight.Bold) },
             text = {
                 Column {
-                    Text("Crear plantilla basada en el equipo ${equipoExistente.noInventario}", fontSize = 12.sp, color = Color.Gray)
+                    Text("Guarda los datos actuales (Nombre, Categoría, Marca, Modelo, Desc) como una receta para futuros registros.", fontSize = 12.sp, color = Color.Gray)
                     Spacer(modifier = Modifier.height(16.dp))
                     OutlinedTextField(
                         value = cloneTemplateName,
                         onValueChange = { cloneTemplateName = it },
-                        label = { Text("Nombre de la plantilla *") },
+                        label = { Text("Nombre de la nueva plantilla *") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -2023,10 +2100,19 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                 Button(
                     onClick = {
                         if (cloneTemplateName.isNotBlank()) {
-                            viewModel.cloneToTemplate(equipoExistente, cloneTemplateName) {
+                            viewModel.cloneToTemplate(
+                                equipoExistente ?: Equipo(
+                                    nombre = nombre,
+                                    categoria = categoria,
+                                    marca = marca,
+                                    modelo = modelo,
+                                    descripcion = descripcion
+                                ),
+                                cloneTemplateName
+                            ) {
                                 showCloneDialog = false
                                 cloneTemplateName = ""
-                                Toast.makeText(context, "Plantilla creada exitosamente", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Plantilla '$cloneTemplateName' creada", Toast.LENGTH_SHORT).show()
                             }
                         } else {
                             Toast.makeText(context, "Ingresa un nombre para la plantilla", Toast.LENGTH_SHORT).show()
@@ -2035,7 +2121,7 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                     enabled = !viewModel.isLoading
                 ) {
                     if (viewModel.isLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White)
-                    else Text("CREAR")
+                    else Text("GUARDAR")
                 }
             },
             dismissButton = {
@@ -2120,7 +2206,10 @@ fun CameraOCRDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
     // Para selección de área
     var selectionRect by remember { mutableStateOf<android.graphics.Rect?>(null) }
     var detectedTextInSelection by remember { mutableStateOf("") }
-
+    var detectedWords by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectedWords by remember { mutableStateOf(mutableListOf<String>()) }
+    var showWordSelection by remember { mutableStateOf(false) }
+    
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -2197,7 +2286,21 @@ fun CameraOCRDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
                                             val cropped = cropBitmap(capturedBitmap!!, rect, size.width, size.height)
                                             recognizer.process(InputImage.fromBitmap(cropped, 0))
                                                 .addOnSuccessListener { visionText ->
-                                                    detectedTextInSelection = visionText.text.trim()
+                                                    // Extract words/lines instead of chars
+                                                    val words = mutableListOf<String>()
+                                                    visionText.textBlocks.forEach { block ->
+                                                        block.lines.forEach { line ->
+                                                            // Add the full line as a "word" (or split by spaces)
+                                                            line.text.split(" ").forEach { word ->
+                                                                if (word.isNotBlank()) {
+                                                                    words.add(word.trim())
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    detectedWords = words.distinct()
+                                                    showWordSelection = true
+                                                    isAnalyzing = false
                                                 }
                                                 .addOnCompleteListener { isAnalyzing = false }
                                         }
@@ -2222,11 +2325,11 @@ fun CameraOCRDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
 
                     if (isAnalyzing) CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Cyan)
 
-                    // Resultado
-                    if (detectedTextInSelection.isNotEmpty()) {
+                    // Resultado: Palabras detectadas para selección
+                    if (detectedWords.isNotEmpty() && showWordSelection) {
                         Popup(
                             alignment = Alignment.BottomCenter,
-                            offset = IntOffset(0, -200),
+                            offset = IntOffset(0, -100),
                             properties = PopupProperties(focusable = true)
                         ) {
                             Card(
@@ -2234,24 +2337,50 @@ fun CameraOCRDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
                                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
                             ) {
                                 Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("Texto Detectado:", fontWeight = FontWeight.Bold)
-                                    Text(detectedTextInSelection, fontSize = 22.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
-                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text("Palabras detectadas:", fontWeight = FontWeight.Bold)
+                                    Text("Toca para agregar a tu selección", fontSize = 12.sp, color = Color.Gray)
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    
+                                    // Lista de palabras
+                                    LazyColumn(
+                                        modifier = Modifier.heightIn(max = 200.dp)
+                                    ) {
+                                        items(detectedWords) { word ->
+                                            Button(
+                                                onClick = {
+                                                    selectedWords.add(word)
+                                                },
+                                                modifier = Modifier.padding(2.dp)
+                                            ) {
+                                                Text(word, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                    
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text("Seleccionadas: ${selectedWords.joinToString(" ")}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                    
+                                    Spacer(modifier = Modifier.height(12.dp))
                                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                         OutlinedButton(onClick = { 
-                                            detectedTextInSelection = ""
+                                            detectedWords = emptyList()
+                                            selectedWords.clear()
+                                            showWordSelection = false
                                             selectionRect = null 
                                         }) {
                                             Text("REINTENTAR")
                                         }
-                                        Button(onClick = { onResult(detectedTextInSelection) }) { 
-                                            Text("USAR TEXTO") 
+                                        Button(onClick = { 
+                                            onResult(selectedWords.joinToString(" "))
+                                        }) { 
+                                            Text("USAR PALABRAS") 
                                         }
                                     }
                                 }
                             }
                         }
                     }
+
 
                     Row(modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp)) {
                         Button(onClick = { capturedBitmap = null; detectedTextInSelection = ""; selectionRect = null }) { Text("REINTENTAR FOTO") }

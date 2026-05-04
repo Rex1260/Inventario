@@ -61,15 +61,18 @@ export default function Plantillas() {
           })
           .eq('id', editing.id)
       } else {
+        // Usar upsert para manejar conflictos de nombre único
         await supabase
           .from('plantillas')
-          .insert({
+          .upsert({
             nombre_plantilla: nombrePlantilla,
             equipo_nombre: equipoNombre,
             categoria,
             marca,
             modelo,
             descripcion_default: descripcion
+          }, {
+            onConflict: 'nombre_plantilla'
           })
       }
       
