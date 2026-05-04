@@ -629,7 +629,6 @@ fun SalidaEquiposView(viewModel: InventarioViewModel) {
 @Composable
 fun RetornoEquiposView(viewModel: InventarioViewModel) {
     var searchQuery by remember { mutableStateOf("") }
-    var employeeSearchQuery by remember { mutableStateOf("") }
     var showOCR by remember { mutableStateOf(false) }
     
     // Lista de préstamos encontrados para devolver
@@ -690,65 +689,7 @@ fun RetornoEquiposView(viewModel: InventarioViewModel) {
         }
     }
 
-    // Filtrar préstamos por nombre de empleado en tiempo real
-    val filteredByEmployee = remember(employeeSearchQuery, viewModel.prestamosActivos) {
-        if (employeeSearchQuery.isBlank()) {
-            emptyList()
-        } else {
-            viewModel.prestamosActivos.filter { prestamo ->
-                prestamo.nombreComodatario?.contains(employeeSearchQuery, ignoreCase = true) == true
-            }.distinctBy { it.nombreComodatario }
-        }
-    }
-
     Column(modifier = Modifier.fillMaxSize()) {
-        // Búsqueda por nombre de empleado (tiempo real)
-        OutlinedTextField(
-            value = employeeSearchQuery,
-            onValueChange = { employeeSearchQuery = it },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            placeholder = { Text("Buscar por nombre de empleado...") },
-            leadingIcon = { Icon(Icons.Default.Person, null) },
-            trailingIcon = {
-                if (employeeSearchQuery.isNotEmpty()) {
-                    IconButton(onClick = { 
-                        employeeSearchQuery = ""
-                    }) { Icon(Icons.Default.Clear, null) }
-                }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp)
-        )
-        
-        // Mostrar resultados de búsqueda por empleado
-        if (employeeSearchQuery.isNotBlank() && filteredByEmployee.isNotEmpty()) {
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-            ) {
-                LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
-                    items(filteredByEmployee) { prestamo ->
-                        Button(
-                            onClick = {
-                                // Cargar todos los préstamos de este empleado
-                                val prestamosDelEmpleado = viewModel.prestamosActivos.filter { 
-                                    it.nombreComodatario == prestamo.nombreComodatario 
-                                }
-                                prestamosEncontrados.clear()
-                                prestamosEncontrados.addAll(prestamosDelEmpleado)
-                                employeeSearchQuery = ""
-                            },
-                            modifier = Modifier.fillMaxWidth().padding(4.dp)
-                        ) {
-                            Text(prestamo.nombreComodatario ?: "SIN NOMBRE", fontSize = 14.sp)
-                        }
-                        HorizontalDivider()
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
         Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = searchQuery,
@@ -949,52 +890,143 @@ fun RetornoEquiposView(viewModel: InventarioViewModel) {
 
 @Composable
 fun PendientesView(viewModel: InventarioViewModel) {
-    val prestamosPorPersona = remember(viewModel.prestamosActivos.size) {
-        viewModel.prestamosActivos.groupBy { it.nombreComodatario ?: "SIN NOMBRE" }
+    var employeeSearchQuery by remember { mutableStateOf("") }
+    var selectedEmployee by remember { mutableStateOf<String?>(null) }
+    
+    // Filtrar préstamos por nombre de empleado en tiempo real
+    val filteredEmployees = remember(employeeSearchQuery, viewModel.prestamosActivos) {
+        if (employeeSearchQuery.isBlank()) {
+            emptyList()
+        } else {
+            viewModel.prestamosActivos.filter { prestamo ->
+                prestamo.nombreComodatario?.contains(employeeSearchQuery, ignoreCase = true) == true
+            }.map { it.nombreComodatario ?: "SIN NOMBRE" }.distinct()
+        }
+    }
+    
+    // Préstamos agrupados por persona (filtrados si hay selección)
+    val prestamosPorPersona = remember(viewModel.prestamosActivos, selectedEmployee) {
+        val filtered = if (selectedEmployee != null) {
+            viewModel.prestamosActivos.filter { it.nombreComodatario == selectedEmployee }
+        } else {
+            viewModel.prestamosActivos
+        }
+        filtered.groupBy { it.nombreComodatario ?: "SIN NOMBRE" }
     }
 
-    if (prestamosPorPersona.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.AssignmentTurnedIn, null, modifier = Modifier.size(64.dp), tint = Color.LightGray)
-                Text("No hay préstamos pendientes", color = Color.Gray)
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Búsqueda por nombre de empleado (tiempo real)
+        OutlinedTextField(
+            value = employeeSearchQuery,
+            onValueChange = { 
+                employeeSearchQuery = it
+                selectedEmployee = null // Limpiar selección al escribir
+            },
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            placeholder = { Text("Buscar por nombre de empleado...") },
+            leadingIcon = { Icon(Icons.Default.Person, null) },
+            trailingIcon = {
+                if (employeeSearchQuery.isNotEmpty()) {
+                    IconButton(onClick = { 
+                        employeeSearchQuery = ""
+                        selectedEmployee = null
+                    }) { Icon(Icons.Default.Clear, null) }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp)
+        )
+        
+        // Mostrar resultados de búsqueda por empleado
+        if (employeeSearchQuery.isNotBlank() && filteredEmployees.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                    items(filteredEmployees) { nombre ->
+                        Button(
+                            onClick = {
+                                selectedEmployee = nombre
+                                employeeSearchQuery = ""
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(4.dp)
+                        ) {
+                            Text(nombre, fontSize = 14.sp)
+                        }
+                        HorizontalDivider()
+                    }
+                }
             }
+            Spacer(modifier = Modifier.height(8.dp))
         }
-    } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
-        ) {
-            prestamosPorPersona.forEach { (nombre, prestamos) ->
-                item {
-                    Column {
-                        Text(
-                            text = nombre,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        
-                        prestamos.forEach { prestamo ->
-                            val equipo = viewModel.equiposPrestados.find { it.id == prestamo.idEquipo }
-                            Card(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            ) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Devices, null, modifier = Modifier.size(24.dp))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text("Inv: ${equipo?.noInventario ?: "N/A"}", fontWeight = FontWeight.Bold)
-                                        Text("${equipo?.nombre ?: "N/A"} - Folio: ${prestamo.folio}", fontSize = 12.sp)
-                                        Text("Desde: ${prestamo.fechaPrestamo?.substringBefore("T")}", fontSize = 11.sp, color = Color.Gray)
+        
+        // Mostrar empleado seleccionado
+        if (selectedEmployee != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Mostrando: $selectedEmployee", fontWeight = FontWeight.Bold)
+                    TextButton(onClick = { 
+                        selectedEmployee = null
+                        employeeSearchQuery = ""
+                    }) {
+                        Text("LIMPIAR")
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        if (prestamosPorPersona.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.AssignmentTurnedIn, null, modifier = Modifier.size(64.dp), tint = Color.LightGray)
+                    Text("No hay préstamos pendientes", color = Color.Gray)
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp)
+            ) {
+                prestamosPorPersona.forEach { (nombre, prestamos) ->
+                    item {
+                        Column {
+                            Text(
+                                text = nombre,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                             
+                            prestamos.forEach { prestamo ->
+                                val equipo = viewModel.equiposPrestados.find { it.id == prestamo.idEquipo }
+                                Card(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                ) {
+                                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Devices, null, modifier = Modifier.size(24.dp))
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text("Inv: ${equipo?.noInventario ?: "N/A"}", fontWeight = FontWeight.Bold)
+                                            Text("${equipo?.nombre ?: "N/A"} - Folio: ${prestamo.folio}", fontSize = 12.sp)
+                                            Text("Desde: ${prestamo.fechaPrestamo?.substringBefore("T")}", fontSize = 11.sp, color = Color.Gray)
+                                        }
                                     }
                                 }
                             }
+                            HorizontalDivider(modifier = Modifier.padding(top = 16.dp), thickness = 0.5.dp, color = Color.LightGray)
                         }
-                        HorizontalDivider(modifier = Modifier.padding(top = 16.dp), thickness = 0.5.dp, color = Color.LightGray)
                     }
                 }
             }
