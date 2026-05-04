@@ -2,6 +2,8 @@ package com.example.inventario
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipboardManager
+import android.content.ClipData
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -1010,8 +1012,15 @@ fun PendientesView(viewModel: InventarioViewModel) {
                              
                             prestamos.forEach { prestamo ->
                                 val equipo = viewModel.equiposPrestados.find { it.id == prestamo.idEquipo }
+                                val context = LocalContext.current
                                 Card(
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                                        // Copiar número de comodato (folio) al portapapeles
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        val clip = ClipData.newPlainText("Folio", prestamo.folio ?: "")
+                                        clipboard.setPrimaryClip(clip)
+                                        Toast.makeText(context, "Folio ${prestamo.folio} copiado", Toast.LENGTH_SHORT).show()
+                                    },
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                                 ) {
                                     Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
