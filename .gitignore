@@ -17,3 +17,4 @@ local.properties
 /web/.next
 /web/out
 /web/build
+/web/package-lock.json
