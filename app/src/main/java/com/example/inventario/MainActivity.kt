@@ -70,6 +70,8 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import io.github.jan.supabase.postgrest.from
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -1155,7 +1157,7 @@ fun FormularioResguardo(viewModel: InventarioViewModel, onDismiss: () -> Unit, o
                 Text("Comodatario (Recibe):", fontWeight = FontWeight.Bold)
                 if (viewModel.usuarioSeleccionado == null) {
                     val prNomRule = viewModel.getRule("PR_COMO")
-                    val prNomMaxLen = prNomRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 100
+                    val prNomMaxLen = prNomRule?.technicalSpecs?.let { it["max_len"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() } ?: 100
 
                     OutlinedTextField(
                         value = searchQuery,
@@ -1344,7 +1346,7 @@ fun FormularioDano(viewModel: InventarioViewModel, equipo: Equipo, prestamo: Pre
                 Spacer(modifier = Modifier.height(16.dp))
                 
                 val danoRule = viewModel.getRule("DAN_DESC")
-                val danoMaxLen = danoRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 500
+                val danoMaxLen = danoRule?.technicalSpecs?.let { it["max_len"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() } ?: 500
 
                 OutlinedTextField(
                     value = descripcion,
@@ -1561,7 +1563,17 @@ fun EquipoSeleccionCard(equipo: Equipo, isSelected: Boolean, onSelect: () -> Uni
 fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, onDismiss: () -> Unit) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
-
+    
+    // Template states
+    var showTemplateSelector by remember { mutableStateOf(false) }
+    var showCloneDialog by remember { mutableStateOf(false) }
+    var cloneTemplateName by remember { mutableStateOf("") }
+    
+    // Cargar plantillas al abrir el formulario
+    LaunchedEffect(Unit) {
+        viewModel.fetchPlantillas()
+    }
+    
     // Estados de los campos
     var noInventario by remember { mutableStateOf(equipoExistente?.noInventario ?: "") }
     var nombre by remember { mutableStateOf(equipoExistente?.nombre ?: "") }
@@ -1601,6 +1613,15 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                                 showDanosHistorial = true 
                             }) {
                                 Icon(Icons.Default.History, "Historial de Daños", tint = MaterialTheme.colorScheme.error)
+                            }
+                            // Botón Clonar a Plantilla
+                            IconButton(onClick = { showCloneDialog = true }) {
+                                Icon(Icons.Default.ContentCopy, "Clonar a Plantilla", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        } else {
+                            // Botón de Plantillas (solo en creación)
+                            IconButton(onClick = { showTemplateSelector = true }) {
+                                Icon(Icons.Default.AutoMode, "Cargar Plantilla", tint = MaterialTheme.colorScheme.primary)
                             }
                         }
 
@@ -1682,9 +1703,9 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                     val serRule = viewModel.getRule("EQ_SERIE")
                     val tagRule = viewModel.getRule("EQ_TAG")
 
-                    val invMaxLen = invRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 8
-                    val invRegex = invRule?.technicalSpecs?.get("regex")?.toString()?.replace("\"", "") ?: "^[A-Z]{3}[0-9]{5}$"
-                    val sugTriggerLen = invRule?.technicalSpecs?.get("suggestion_trigger_len")?.toString()?.toIntOrNull() ?: 3
+                    val invMaxLen = invRule?.technicalSpecs?.let { it["max_len"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() } ?: 8
+                    val invRegex = invRule?.technicalSpecs?.let { it["regex"]?.jsonPrimitive?.contentOrNull }?.replace("\"", "") ?: "^[A-Z]{3}[0-9]{5}$"
+                    val sugTriggerLen = invRule?.technicalSpecs?.let { it["suggestion_trigger_len"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() } ?: 3
 
                     OutlinedTextField(
                         value = noInventario,
@@ -1721,7 +1742,7 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                         singleLine = true
                     )
 
-                    val nomMaxLen = nomRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 100
+                    val nomMaxLen = nomRule?.technicalSpecs?.let { it["max_len"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() } ?: 100
                     ExposedDropdownField(
                         label = "${nomRule?.displayName ?: "Nombre del Equipo"} *",
                         value = nombre,
@@ -1777,7 +1798,7 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                         )
                     }
 
-                    val serMaxLen = serRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 50
+                    val serMaxLen = serRule?.technicalSpecs?.let { it["max_len"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() } ?: 50
                     OutlinedTextField(
                         value = serie,
                         onValueChange = { if (it.length <= serMaxLen) serie = it.uppercase() },
@@ -1793,7 +1814,7 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                         singleLine = true
                     )
 
-                    val tagMaxLen = tagRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 50
+                    val tagMaxLen = tagRule?.technicalSpecs?.let { it["max_len"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() } ?: 50
                     OutlinedTextField(
                         value = tag,
                         onValueChange = { if (it.length <= tagMaxLen) tag = it.uppercase() },
@@ -1809,7 +1830,7 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                         singleLine = true
                     )
 
-                    val descMaxLen = descRule?.technicalSpecs?.get("max_len")?.toString()?.toIntOrNull() ?: 500
+                    val descMaxLen = descRule?.technicalSpecs?.let { it["max_len"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() } ?: 500
                     OutlinedTextField(
                         value = descripcion,
                         onValueChange = { if (it.length <= descMaxLen) descripcion = it },
@@ -1873,7 +1894,7 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                     Text("HISTORIAL DE DAÑOS", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.error)
                     Text("Equipo: ${equipoExistente.noInventario}", fontSize = 12.sp, color = Color.Gray)
                     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-
+                    
                     if (viewModel.isLoading) {
                         CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
                     } else if (viewModel.danosDelEquipo.isEmpty()) {
@@ -1929,6 +1950,103 @@ fun FormularioEquipo(viewModel: InventarioViewModel, equipoExistente: Equipo?, o
                 }
             }
         }
+    }
+    
+    // Template Selector Dialog
+    if (showTemplateSelector) {
+        AlertDialog(
+            onDismissRequest = { showTemplateSelector = false },
+            title = { Text("Cargar Plantilla", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    if (viewModel.plantillas.isEmpty()) {
+                        Text("No hay plantillas disponibles.", color = Color.Gray)
+                    } else {
+                        LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                            items(viewModel.plantillas) { plantilla ->
+                                Card(
+                                    onClick = {
+                                        val templateData = viewModel.applyTemplate(plantilla)
+                                        nombre = templateData["nombre"] ?: ""
+                                        categoria = templateData["categoria"] ?: ""
+                                        marca = templateData["marca"] ?: ""
+                                        modelo = templateData["modelo"] ?: ""
+                                        descripcion = templateData["descripcion"] ?: ""
+                                        showTemplateSelector = false
+                                        Toast.makeText(context, "Plantilla '${plantilla.nombrePlantilla}' cargada", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(plantilla.nombrePlantilla, fontWeight = FontWeight.Bold)
+                                        if (!plantilla.equipoNombre.isNullOrEmpty()) {
+                                            Text("Equipo: ${plantilla.equipoNombre}", fontSize = 12.sp, color = Color.Gray)
+                                        }
+                                        if (!plantilla.categoria.isNullOrEmpty()) {
+                                            Text("Categoría: ${plantilla.categoria}", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTemplateSelector = false }) {
+                    Text("CANCELAR")
+                }
+            }
+        )
+    }
+    
+    // Clone to Template Dialog
+    if (showCloneDialog && equipoExistente != null) {
+        AlertDialog(
+            onDismissRequest = { showCloneDialog = false },
+            title = { Text("Clonar a Plantilla", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("Crear plantilla basada en el equipo ${equipoExistente.noInventario}", fontSize = 12.sp, color = Color.Gray)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = cloneTemplateName,
+                        onValueChange = { cloneTemplateName = it },
+                        label = { Text("Nombre de la plantilla *") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (cloneTemplateName.isNotBlank()) {
+                            viewModel.cloneToTemplate(equipoExistente, cloneTemplateName) {
+                                showCloneDialog = false
+                                cloneTemplateName = ""
+                                Toast.makeText(context, "Plantilla creada exitosamente", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(context, "Ingresa un nombre para la plantilla", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    enabled = !viewModel.isLoading
+                ) {
+                    if (viewModel.isLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White)
+                    else Text("CREAR")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { 
+                    showCloneDialog = false
+                    cloneTemplateName = ""
+                }) {
+                    Text("CANCELAR")
+                }
+            }
+        )
     }
 }
 

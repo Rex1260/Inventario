@@ -17,6 +17,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.inventario.data.supabase
 import com.example.inventario.model.Dano
 import com.example.inventario.model.Equipo
+import com.example.inventario.model.Plantilla
 import com.example.inventario.model.Prestamo
 import com.example.inventario.model.Usuario
 import io.github.jan.supabase.postgrest.from
@@ -981,5 +982,66 @@ class InventarioViewModel(application: Application) : AndroidViewModel(applicati
     fun isComponentActive(key: String): Boolean {
         val component = getRule(key) ?: return true // Si no existe, asumimos activo por compatibilidad
         return component.status == "ACTIVO"
+    }
+
+    // --- Template Functions ---
+
+    private val _plantillas = mutableStateListOf<Plantilla>()
+    val plantillas: List<Plantilla> get() = _plantillas
+
+    fun fetchPlantillas() {
+        viewModelScope.launch {
+            try {
+                val results = supabase.from("plantillas")
+                    .select {
+                        filter {
+                            eq("is_active", true)
+                        }
+                        order("nombre_plantilla", Order.ASCENDING)
+                    }
+                    .decodeList<Plantilla>()
+                _plantillas.clear()
+                _plantillas.addAll(results)
+            } catch (e: Exception) {
+                errorMessage = "Error cargando plantillas: ${e.message}"
+            }
+        }
+    }
+
+    fun applyTemplate(plantilla: Plantilla): Map<String, String?> {
+        return mapOf(
+            "nombre" to plantilla.equipoNombre,
+            "categoria" to plantilla.categoria,
+            "marca" to plantilla.marca,
+            "modelo" to plantilla.modelo,
+            "descripcion" to plantilla.descripcionDefault
+        )
+    }
+
+    fun cloneToTemplate(
+        equipo: Equipo,
+        nombrePlantilla: String,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            isLoading = true
+            try {
+                val nuevaPlantilla = Plantilla(
+                    nombrePlantilla = nombrePlantilla,
+                    equipoNombre = equipo.nombre,
+                    categoria = equipo.categoria,
+                    marca = equipo.marca,
+                    modelo = equipo.modelo,
+                    descripcionDefault = equipo.descripcion
+                )
+                supabase.from("plantillas").insert(nuevaPlantilla)
+                fetchPlantillas()
+                onSuccess()
+            } catch (e: Exception) {
+                errorMessage = "Error al clonar: ${e.message}"
+            } finally {
+                isLoading = false
+            }
+        }
     }
 }
