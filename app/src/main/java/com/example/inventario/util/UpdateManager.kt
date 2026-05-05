@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Environment
 import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
 
@@ -44,11 +45,12 @@ object UpdateManager {
                 }
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(onComplete, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                context.registerReceiver(onComplete, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
-            }
+            ContextCompat.registerReceiver(
+                context, 
+                onComplete, 
+                IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), 
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
             
         } catch (e: Exception) {
             Log.e("UpdateManager", "Error al descargar: ${e.message}")
