@@ -1,5 +1,177 @@
 # AGENTS.md
 
+## Session History System
+
+Este proyecto tiene un sistema de historial de sesiones para agentes LLM. Permite que cualquier agente (OpenCode, Gemini CLI, Claude Code, etc.) pueda continuar el trabajo donde otro agente lo dejó.
+
+### Tablas de Sesión
+
+| Tabla | Descripción |
+|-------|-------------|
+| `session_history` | Registro de sesiones con contexto completo |
+| `session_messages` | Mensajes de cada sesión |
+| `llm_agents_registry` | Registro de agentes soportados |
+
+### Funciones Disponibles
+
+| Función | Uso |
+|---------|-----|
+| `start_session(llm_tool, project_path)` | Iniciar nueva sesión |
+| `save_context(session_id, context, instructions, files_md, todo)` | Auto-guardar |
+| `end_session(session_id, summary)` | Terminar sesión |
+| `get_last_session(project_path)` | Obtener última sesión |
+| `resume_session(session_id)` | Continuar sesión |
+| `add_session_message(session_id, role, content)` | Agregar mensaje |
+| `register_agent(agent_type, version, capabilities)` | Registrar agente |
+
+### Session ID Actual
+
+```
+6393f9f4-489f-4d68-b53e-6fcecf31dc97
+```
+
+### Instrucciones para Nuevo Agente
+
+Cuando un nuevo agente se conecte a este proyecto:
+
+1. **Verificar sesiones pendientes:**
+   ```sql
+   SELECT * FROM session_history 
+   WHERE project_path = 'C:\Users\grobles\AndroidStudioProjects\Inventario' 
+   AND session_end IS NULL;
+   ```
+
+2. **Si hay sesión activa, continuar:**
+   ```sql
+   SELECT resume_session('session_id');
+   ```
+
+3. **Crear nueva sesión si no hay activa:**
+   ```sql
+   SELECT start_session('opencode', 'C:\Users\grobles\AndroidStudioProjects\Inventario');
+   ```
+
+### Auto-Guardado
+
+El agente debe guardar contexto periódicamente usando `save_context()`:
+- Cada 20 minutos (configurable)
+- Antes de cerrar sesión
+- Después de completar tareas importantes
+
+#### Edge Function: auto-save-session
+
+Esta función ejecuta auto-guardado capturando contexto de git y guardándolo en la sesión activa.
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/auto_save` | POST | Ejecuta auto-guardado (captura git, actualiza sesión) |
+| `/health` | GET | Verifica que la función está activa |
+
+**URL**: `https://gtzqekmewuwxcpyrojpn.supabase.co/functions/v1/auto-save-session`
+
+**Configuración**: `auto_save_config` (intervalo 20 minutos)
+
+#### Cómo usar auto-guardado
+
+1. **Manual**: El agente puede llamar directamente:
+   ```
+   curl -X POST https://gtzqekmewuwxcpyrojpn.supabase.co/functions/v1/auto-save-session/auto_save
+   ```
+
+2. **Automático (si pg_cron está habilitado)**:
+   - Se ejecuta cada 20 minutos como backup
+   - Captura: branch, último commit, cambios sin commit
+
+3. **En código** (usando MCP supabase):
+   ```sql
+   SELECT save_context(
+     'session_id',
+     '{"last_auto_save": "timestamp"}'::jsonb,
+     '{}'::jsonb,
+     '[]'::jsonb,
+     '[]'::jsonb
+   );
+   ```
+
+#### Tabla: auto_save_config
+
+| Campo | Tipo | Default | Descripción |
+|-------|------|---------|-------------|
+| `interval_minutes` | integer | 20 | Intervalo de guardado |
+| `capture_git` | boolean | true | Capturar info de git |
+| `capture_files_md` | boolean | true | Listar archivos .md |
+| `capture_db_state` | boolean | true | Snapshot de BD |
+
+####pg_cron (opcional - si está habilitado)
+
+Para programar auto-guardado cada 20 minutos:
+
+```sql
+SELECT cron.schedule(
+  'auto-save-inventario',
+  '*/20 * * * *',
+  $$SELECT net.http_post(
+    url:='https://gtzqekmewuwxcpyrojpn.supabase.co/functions/v1/auto-save-session/auto_save',
+    headers:='{"Content-Type":"application/json"}'::jsonb
+  )$$
+);
+```
+
+Si pg_cron no está habilitado, el agente debe llamar manualmente la función de auto-guardado.
+
+### Formato de Contexto
+
+```json
+{
+  "current_branch": "main",
+  "last_commit": "hash",
+  "pending_changes": [],
+  "todo_list": [],
+  "files_md": [],
+  "database_state": {},
+  "agent_notes": ""
+}
+```
+
+---
+
+## MCP Configuration (OpenCode)
+
+Este proyecto tiene configurados múltiples MCPs de Supabase con diferente nivel de acceso.
+
+### MCPs Disponibles
+
+| MCP | Tipo | Uso | Auth |
+|-----|------|-----|------|
+| **supabase** | Local (npx) | Consultas normales, edge functions, logs | Anon/Service Role |
+| **mcp-agent** | Remote (Edge Function) | Operaciones con bypassrls | Basic |
+| **descope** | Remote | Gestión de tokens y auth | Descope Project |
+
+### Cuándo Usar Cada MCP
+
+| Operación | MCP Recomendado |
+|-----------|----------------|
+| SELECT simple | `supabase` |
+| INSERT/UPDATE con RLS | `supabase` |
+| Edge Functions | `supabase` |
+| Ver logs, advisors | `supabase` |
+| Tablas con RLS restrictiva | `mcp-agent` |
+| DDL (CREATE, ALTER, DROP) | `mcp-agent` |
+| Migraciones | `mcp-agent` |
+| Operaciones que requieren bypassrls | `mcp-agent` |
+
+### Credenciales Importantes
+
+| Dato | Valor |
+|------|-------|
+| **Supabase project-ref** | `gtzqekmewuwxcpyrojpn` |
+| **Descope Project ID** | `P3DaJc3A4ro37nG2IKEDFxBwvufB` |
+| **mcp_agent password** | `McP_Agent_Secure_2026!xK9#Lp2$vN8@qR4&mT7*wZ3` |
+| **mcp_agent role** | bypassrls habilitado |
+| **Edge Function mcp-agent** | `https://gtzqekmewuwxcpyrojpn.supabase.co/functions/v1/mcp-agent` |
+
+---
+
 ## Repo Layout
 - No root `package.json` — not a JavaScript monorepo
 - `app/`: Android application module (Gradle, Kotlin)
